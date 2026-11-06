@@ -1,0 +1,12 @@
+.env
+.env.local
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+frontend/node_modules/
+frontend/.next/
+frontend/next-env.d.ts
+supabase/.temp/
+supabase/.branches/
+.DS_Store
