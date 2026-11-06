@@ -7,14 +7,16 @@ from app.models.report import OutcomeReport
 from app.models.transcript import TranscriptEvent
 
 from .base import Repository
-from .seed import DEFAULT_TEMPLATES
+from .seed import DEFAULT_TEMPLATES, sample_profile
 
 
 class MemoryRepository(Repository):
     name = "memory"
 
-    def __init__(self) -> None:
+    def __init__(self, seed_principal_id: str | None = None) -> None:
         self.profiles: dict[str, PrincipalProfile] = {}
+        if seed_principal_id:
+            self.profiles[seed_principal_id] = sample_profile(seed_principal_id)
         self.missions: dict[str, Mission] = {}
         self.conversations: dict[str, Conversation] = {}
         self.events: dict[str, list[TranscriptEvent]] = {}

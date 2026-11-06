@@ -45,7 +45,7 @@ def build_container(settings: Settings | None = None) -> Container:
     else:
         log.warning("Supabase not configured: using the in-memory repository (data is lost "
                     "on restart).")
-        repo = MemoryRepository()
+        repo = MemoryRepository(seed_principal_id=s.default_principal_id)
     return Container(settings=s, llm=DemoLLM() if use_demo else OpenRouterProvider(s),
                      stt=SarvamSTT(s), tts=SarvamTTS(s), repo=repo)
 

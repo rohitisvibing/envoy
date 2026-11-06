@@ -1,4 +1,26 @@
 from app.models.mission import AgentTemplate
+from app.models.principal import Disclosure, PrincipalProfile, ProfileField
+
+
+def sample_profile(principal_id: str) -> PrincipalProfile:
+    """Same sample principal as supabase/seed.sql, for zero-setup runs."""
+    rows = [
+        ("full_name", "Full name", "Ananya Iyer", Disclosure.always),
+        ("preferred_name", "Preferred name", "Ananya", Disclosure.always),
+        ("occupation", "Occupation", "Software engineer", Disclosure.relevant),
+        ("company", "Company", None, Disclosure.relevant),
+        ("city", "Current city", "Bengaluru", Disclosure.relevant),
+        ("phone", "Phone number", None, Disclosure.approval),
+        ("email", "Email", None, Disclosure.approval),
+        ("salary", "Salary", None, Disclosure.never),
+    ]
+    return PrincipalProfile(
+        id=principal_id, preferred_languages=["English", "Kannada"],
+        communication_preferences="Prefers concise, respectful conversations.",
+        background="Has rented the current apartment in Indiranagar for two years and always "
+                   "paid on time.",
+        fields=[ProfileField(key=k, label=lbl, value=v, disclosure=d) for k, lbl, v, d in rows])
+
 
 DEFAULT_TEMPLATES = [
     AgentTemplate(

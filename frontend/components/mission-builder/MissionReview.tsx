@@ -65,7 +65,7 @@ function QuantityEditor({ items, onChange, kind }: { items: Quantity[]; onChange
             inputMode="numeric"
             value={Number.isFinite(q.value) ? String(q.value) : ""}
             onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, value: Number(e.target.value.replace(/[^\d.]/g, "")) } : x)))}
-            className="h-10 bg-surface font-mono tabular"
+            className="h-10 bg-surface tabular"
           />
           <select
             aria-label="Direction"
@@ -229,7 +229,7 @@ export function MissionReview({ id }: { id: string }) {
             <p className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-body">
               {spec.hard_limits.map((q) => (
                 <span key={q.name}>
-                  {q.label}: <span className="font-mono tabular text-ink">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
+                  {q.label}: <span className="tabular text-ink">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
                 </span>
               ))}
             </p>

@@ -94,8 +94,8 @@ export function Dashboard() {
           href="/missions/new"
           className="mt-6 flex w-full items-center justify-between rounded-2xl border border-line bg-surface px-4 py-4 text-left transition-colors hover:border-violet/50 sm:max-w-xl"
         >
-          <span className="text-body text-ink-3">Negotiate my rent down to ₹30,000…</span>
-          <span className="rounded-lg bg-ink px-3 py-1.5 text-meta font-medium text-bg">New mission</span>
+          <span className="min-w-0 truncate text-body text-ink-3">Negotiate my rent down to ₹30,000…</span>
+          <span className="ml-3 shrink-0 whitespace-nowrap rounded-lg bg-ink px-3 py-2 text-meta font-medium text-bg">New mission</span>
         </Link>
       </section>
 

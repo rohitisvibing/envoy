@@ -38,7 +38,7 @@ export function MissionStatePanel({ spec, n, className }: { spec: MissionSpec; n
               {rows.map(([label, v, tone]) => (
                 <div key={label}>
                   <dt className="text-[11px] text-ink-3">{label}</dt>
-                  <dd className={cn("font-mono text-body tabular", v == null ? "text-ink-3" : tone ?? "text-ink")}>{money(v ?? null, ref.unit)}</dd>
+                  <dd className={cn("text-body tabular", v == null ? "text-ink-3" : tone ?? "text-ink")}>{money(v ?? null, ref.unit)}</dd>
                 </div>
               ))}
             </dl>

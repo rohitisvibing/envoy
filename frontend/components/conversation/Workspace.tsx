@@ -220,7 +220,7 @@ export function Workspace({ id }: { id: string }) {
     ? "Type what you want to say. The agent's voice speaks it."
     : inputMode === "counterparty"
       ? `Type what the ${cpLabel.toLowerCase()} said`
-      : "Tell the agent something: “Ask about maintenance”";
+      : "Tell the agent what to do";
 
   const spec = view.mission?.spec;
 
@@ -245,7 +245,7 @@ export function Workspace({ id }: { id: string }) {
     <div className="flex h-dvh flex-col overflow-hidden">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line/70 px-2 sm:px-4">
-        <Button variant="ghost" size="icon" aria-label="Back to missions" render={<Link href="/" />}>
+        <Button variant="ghost" size="icon" aria-label="Back to missions" nativeButton={false} render={<Link href="/" />}>
           <ArrowLeft className="size-5" />
         </Button>
         <div className="min-w-0 flex-1">
@@ -402,7 +402,7 @@ export function Workspace({ id }: { id: string }) {
           >
             <div className="w-full max-w-sm rounded-2xl border border-line bg-elevated p-4 shadow-2xl shadow-black/50">
               <p className="text-body text-ink">{view.report ? "The outcome report is ready." : "Writing the outcome report…"}</p>
-              <Button size="lg" className="mt-3 w-full" disabled={!view.report && view.reportPending} render={<Link href={`/conversations/${id}/report`} />}>
+              <Button size="lg" className="mt-3 w-full" disabled={!view.report && view.reportPending} nativeButton={false} render={<Link href={`/conversations/${id}/report`} />}>
                 View outcome report
               </Button>
             </div>

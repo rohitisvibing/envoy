@@ -38,7 +38,7 @@ function OfferTimeline({ made, received }: { made: Offer[]; received: Offer[] })
       {all.map((o, i) => (
         <li key={i} className={cn("flex items-baseline gap-3", o.side === "agent" ? "" : "")}>
           <span className={cn("w-16 shrink-0 text-meta", o.side === "agent" ? "text-violet" : "text-ink-2")}>{o.side === "agent" ? "Agent" : "Them"}</span>
-          <span className="w-24 shrink-0 font-mono text-body tabular text-ink">{o.amount != null ? money(o.amount) : "—"}</span>
+          <span className="w-24 shrink-0 text-body tabular text-ink">{o.amount != null ? money(o.amount) : "—"}</span>
           <span className="min-w-0 truncate text-meta text-ink-2">{o.terms}</span>
         </li>
       ))}
@@ -106,9 +106,9 @@ export function OutcomeReportView({ id }: { id: string }) {
               {r.comparisons.map((c) => (
                 <tr key={c.name} className="border-b border-line/60">
                   <th scope="row" className="py-3 pr-3 text-body font-normal text-ink">{c.label}</th>
-                  <td className="py-3 pr-3 font-mono text-body tabular text-ink-2">{money(c.target, c.unit)}</td>
-                  <td className="py-3 pr-3 font-mono text-body tabular text-ink-2">{money(c.limit, c.unit)}</td>
-                  <td className="py-3 pr-3 font-mono text-body tabular text-ink">{money(c.achieved, c.unit)}</td>
+                  <td className="py-3 pr-3 text-body tabular text-ink-2">{money(c.target, c.unit)}</td>
+                  <td className="py-3 pr-3 text-body tabular text-ink-2">{money(c.limit, c.unit)}</td>
+                  <td className="py-3 pr-3 text-body tabular text-ink">{money(c.achieved, c.unit)}</td>
                   <td className="py-3">
                     {c.met === true ? <Check className="size-4 text-success" aria-label="Met" /> : c.met === false ? <X className="size-4 text-error" aria-label="Missed" /> : <Minus className="size-4 text-ink-3" aria-label="Not agreed" />}
                   </td>
@@ -161,11 +161,11 @@ export function OutcomeReportView({ id }: { id: string }) {
       <List title="Recommended next steps" items={r.next_steps} empty="No follow-up needed." />
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <Button size="lg" render={<Link href="/missions/new" />}>
+        <Button size="lg" nativeButton={false} render={<Link href="/missions/new" />}>
           New mission
         </Button>
         {mission && (
-          <Button size="lg" variant="secondary" render={<Link href={`/missions/${mission.id}/prepare`} />}>
+          <Button size="lg" variant="secondary" nativeButton={false} render={<Link href={`/missions/${mission.id}/prepare`} />}>
             Run it again
           </Button>
         )}

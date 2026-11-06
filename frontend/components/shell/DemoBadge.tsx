@@ -21,7 +21,8 @@ export function DemoBadge({ className }: { className?: string }) {
       className={cn("inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[12px] text-warning", className)}
       title="Add API keys to .env to use real providers"
     >
-      Demo mode: {gaps.join(", ")}
+      <span className="sm:hidden">Demo mode</span>
+      <span className="hidden sm:inline">Demo mode: {gaps.join(", ")}</span>
     </span>
   );
 }

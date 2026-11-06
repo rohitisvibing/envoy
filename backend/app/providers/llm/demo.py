@@ -152,7 +152,7 @@ class DemoLLM(LLMProvider):
         qname = target_m.group(1) if target_m else None
         target = float(target_m.group(3)) if target_m else None
         limit = float(limit_m.group(1)) if limit_m else target
-        made = re.findall(r'"by": "agent", "amount": ([\d.]+)', user)
+        made = re.findall(r'"by":\s*"agent",\s*"amount":\s*([\d.]+)', user)
         last_offer = float(made[-1]) if made else None
         instructions = _section(user, "PRINCIPAL INSTRUCTIONS \\(highest priority, most recent last\\)")
         directive = _section(user, "DIRECTIVE FOR THIS TURN")
@@ -162,6 +162,11 @@ class DemoLLM(LLMProvider):
                                            quantity_name=qname, terms=last[:120])]
             delta.counterparty_positions = [last[:160]]
 
+        if re.search(r'"agreements":\s*\["', user):
+            return TurnPlan(state_delta=StateDelta(phase="closing"),
+                            response_text="Wonderful, thank you. We'll send the agreement over "
+                                          "in writing. Goodbye!",
+                            objective_met=False, end_conversation=True)
         if "approved" in directive.lower() and "accept" in directive.lower():
             return TurnPlan(state_delta=StateDelta(phase="closing",
                                                    agreements=[directive[:160]]),
@@ -232,11 +237,11 @@ class DemoLLM(LLMProvider):
     def _report(self, user: str, _m) -> ReportDraft:
         transcript = _section(user, "FULL TRANSCRIPT")
         lines = [ln for ln in transcript.splitlines() if ":" in ln]
-        agreed = re.search(r'"agreements": \["([^"]+)"', user)
+        agreed = re.search(r'"agreements":\s*\["([^"]+)"', user)
         amounts = extract_amounts(agreed.group(1)) if agreed else []
-        name_m = re.search(r'"targets": \[\{"name": "([^"]+)"', user)
-        crit_m = re.search(r'"success_criteria": \["([^"]+)"', user)
-        target_m = re.search(r'"targets": \[\{"name": "[^"]+", "label": "[^"]+", "value": ([\d.]+)',
+        name_m = re.search(r'"targets":\s*\[\{"name":\s*"([^"]+)"', user)
+        crit_m = re.search(r'"success_criteria":\s*\["([^"]+)"', user)
+        target_m = re.search(r'"targets":\s*\[\{"name":\s*"[^"]+",\s*"label":\s*"[^"]+",\s*"value":\s*([\d.]+)',
                              user)
         achieved = {name_m.group(1): amounts[-1]} if (name_m and amounts) else {}
         met = bool(achieved and target_m and list(achieved.values())[0] <= float(target_m.group(1)))

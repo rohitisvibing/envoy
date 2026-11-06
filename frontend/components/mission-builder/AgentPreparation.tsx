@@ -40,7 +40,7 @@ function Brief({ mission }: { mission: Mission }) {
           <p className="mt-1.5 flex flex-wrap gap-x-4 text-body">
             {mission.spec.hard_limits.map((q) => (
               <span key={q.name}>
-                {q.label} <span className="font-mono tabular">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
+                {q.label} <span className="tabular">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
               </span>
             ))}
           </p>
@@ -51,7 +51,7 @@ function Brief({ mission }: { mission: Mission }) {
         <ol className="mt-2 space-y-1.5">
           {b.strategy_steps.map((s, i) => (
             <li key={i} className="flex gap-3 text-body">
-              <span className="w-4 shrink-0 text-right font-mono text-meta text-ink-3 tabular">{i + 1}</span>
+              <span className="w-4 shrink-0 text-right text-meta text-ink-3 tabular">{i + 1}</span>
               <span>{s}</span>
             </li>
           ))}
