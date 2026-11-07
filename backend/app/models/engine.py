@@ -33,7 +33,7 @@ class ApprovalNeed(Schema):
 
 class TurnPlan(Schema):
     state_delta: StateDelta = Field(default_factory=StateDelta)
-    response_text: str = Field(description="Exactly what the agent says next (1-3 sentences)")
+    response_text: str = Field(default="", description="Exactly what the agent says next (1-3 sentences)")
     response_language: str = Field(default="English",
                                    description="Language of response_text, e.g. Kannada")
     offers_made: list[Offer] = Field(default_factory=list,
@@ -49,6 +49,10 @@ class TurnPlan(Schema):
     objective_met: bool = False
     end_conversation: bool = Field(default=False,
                                    description="True if response_text is a closing goodbye")
+    hold: bool = Field(
+        default=False,
+        description="Only when acting on a new principal instruction with nothing worth saying "
+                    "right now; response_text empty. Allowed only if the DIRECTIVE permits it.")
 
 
 class SimulatorPersona(Schema):

@@ -118,6 +118,10 @@ class SupabaseRepository(Repository):
     async def add_event(self, event):
         await (await self._t("transcript_events")).insert(_j(event)).execute()
 
+    async def update_event_meta(self, event_id, meta):
+        await (await self._t("transcript_events")).update({"meta": meta}).eq("id", event_id) \
+            .execute()
+
     async def list_events(self, conversation_id):
         res = await (await self._t("transcript_events")).select("*") \
             .eq("conversation_id", conversation_id).order("ts").execute()

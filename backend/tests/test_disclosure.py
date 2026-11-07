@@ -34,7 +34,8 @@ def test_approved_disclosure_is_included_for_that_turn(profile):
 
 def test_turn_context_never_contains_restricted_values(profile, rent_spec):
     text = turn_context(spec=rent_spec, brief=None, profile=profile,
-                        negotiation=NegotiationState(), events=[], active_instructions=[])
+                        negotiation=NegotiationState(), events=[], new_instructions=[],
+                        standing_instructions=[])
     assert "24 LPA" not in text and "98450" not in text
 
 

@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 type Turn = { sources: Set<AudioBufferSourceNode>; ended: boolean; onDone?: () => void };
+/** Playback timeline per turn, in AudioContext seconds. Kept after playback for the transcript. */
+type Timeline = { start: number; end: number; ended: boolean; stoppedAt?: number };
 
 function rms(analyser: AnalyserNode, buf: Float32Array<ArrayBuffer>): number {
   analyser.getFloatTimeDomainData(buf);
@@ -28,6 +30,7 @@ export function useAudioEngine() {
   const micAnalyserRef = useRef<AnalyserNode | null>(null);
   const nextTimeRef = useRef(0);
   const turnsRef = useRef<Map<string, Turn>>(new Map());
+  const timelineRef = useRef<Map<string, Timeline>>(new Map());
   const levelRef = useRef(0);
   const playingRef = useRef(false);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -111,6 +114,9 @@ export function useAudioEngine() {
       const startAt = Math.max(ctx.currentTime + 0.03, nextTimeRef.current);
       src.start(startAt);
       nextTimeRef.current = startAt + buffer.duration;
+      const tl = timelineRef.current.get(turnId);
+      if (!tl) timelineRef.current.set(turnId, { start: startAt, end: startAt + buffer.duration, ended: false });
+      else tl.end = startAt + buffer.duration;
       let turn = turnsRef.current.get(turnId);
       if (!turn) {
         turn = { sources: new Set(), ended: false };
@@ -130,6 +136,8 @@ export function useAudioEngine() {
   /** Mark a turn complete; `onDone` fires once its audio has finished playing. */
   const endTurn = useCallback(
     (turnId: string, onDone: () => void) => {
+      const tl = timelineRef.current.get(turnId);
+      if (tl) tl.ended = true;
       const turn = turnsRef.current.get(turnId);
       if (!turn) {
         onDone();
@@ -144,6 +152,8 @@ export function useAudioEngine() {
 
   /** Stop playback immediately (barge-in, interrupt, pause). */
   const stopAll = useCallback(() => {
+    const now = ctxRef.current?.currentTime ?? 0;
+    for (const tl of timelineRef.current.values()) if (tl.stoppedAt == null && now < tl.end) tl.stoppedAt = now;
     for (const turn of turnsRef.current.values()) {
       for (const s of turn.sources) {
         s.onended = null;
@@ -158,6 +168,21 @@ export function useAudioEngine() {
     nextTimeRef.current = 0;
     playingRef.current = false;
     setSpeakingTurn(null);
+  }, []);
+
+  /**
+   * How much of a turn's audio has been heard, 0..1, or null if no audio arrived for it.
+   * Before the turn's audio is complete, total length is estimated from the text.
+   */
+  const progress = useCallback((turnId: string, textLength: number): number | null => {
+    const tl = timelineRef.current.get(turnId);
+    const ctx = ctxRef.current;
+    if (!tl || !ctx) return null;
+    const now = tl.stoppedAt ?? ctx.currentTime;
+    const known = tl.end - tl.start;
+    const total = tl.ended ? known : Math.max(known, textLength * 0.065);
+    if (total <= 0) return 1;
+    return Math.min(1, Math.max(0, (now - tl.start) / total));
   }, []);
 
   const startMic = useCallback(
@@ -219,5 +244,5 @@ export function useAudioEngine() {
     [stopAll, stopMic],
   );
 
-  return { unlock, unlocked, enqueue, endTurn, stopAll, levelRef, speakingTurn, startMic, stopMic, setMicMuted, micStatus };
+  return { unlock, unlocked, enqueue, endTurn, stopAll, progress, levelRef, speakingTurn, startMic, stopMic, setMicMuted, micStatus };
 }

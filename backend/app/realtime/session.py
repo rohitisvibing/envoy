@@ -43,10 +43,17 @@ log = logging.getLogger(__name__)
 S = ConversationState
 Sink = Callable[[dict], Awaitable[None]]
 
-INTERVENTION_DIRECTIVE = ("The principal just gave you a new instruction. Act on it in your "
-                          "very next line, naturally, without mentioning the instruction itself.")
+NUDGE_DIRECTIVE = (
+    "The principal just sent a new instruction (see NEW FROM THE PRINCIPAL). If it asks you to "
+    "say or ask something, do it now in one natural line without mentioning the instruction. "
+    "If it is only guidance and there is nothing worth saying right now, holding is allowed: "
+    "set hold=true and leave response_text empty.")
 TAKEOVER_RE = re.compile(r"\b(take over|let me (talk|speak|handle))\b", re.IGNORECASE)
-PAUSE_RE = re.compile(r"^\s*(pause|stop|hold on|wait)\b", re.IGNORECASE)
+# Only a bare command pauses ("pause", "stop now", "wait a moment"); "Stop, don't mention X"
+# is a nudge.
+PAUSE_RE = re.compile(
+    r"^\s*(pause|stop|hold on|wait)(\s+(please|now|a (sec|second|moment|minute)|"
+    r"for a (sec|second|moment|minute)))?\s*[.!]*\s*$", re.IGNORECASE)
 MAX_INSTRUCTIONS = 8
 
 
@@ -66,7 +73,13 @@ class LiveSession:
         self.state: ConversationState = conv.state
         self.channel: CounterpartyChannel = (
             SimulatedChannel() if conv.mode == ConversationMode.simulated else BrowserMicChannel())
-        self.instructions = [e.text for e in events if e.kind == EventKind.instruction][-8:]
+        # (event id or None, text). Nudges stay "queued" until a spoken line has used them.
+        self.instructions: list[tuple[str | None, str]] = [
+            (e.id, e.text) for e in events if e.kind == EventKind.instruction]
+        self.queued_nudges: list[str] = [
+            e.id for e in events
+            if e.kind == EventKind.instruction and e.meta.get("status") == "queued"]
+        self._turn_args: tuple[str | None, bool] = (None, False)
         self.approved_disclosures: dict[str, str] = {}
         self.authorised_amounts: set[float] = set()
         self.commitment_approved = bool(self.negotiation.commitments)
@@ -74,7 +87,8 @@ class LiveSession:
         self.paused = conv.state == S.paused
         self.takeover_active = False
         self.muted = False
-        self.respond_after_speech = False
+        # After the current line finishes: None, "nudge" (may hold) or "reply" (must answer).
+        self.respond_after_speech: str | None = None
         self.sinks: set[Sink] = set()
         self.task: asyncio.Task | None = None
         self.task_kind: str | None = None
@@ -156,6 +170,27 @@ class LiveSession:
             await self.c.repo.add_event(event)
         except Exception as e:  # noqa: BLE001
             log.warning("persist event failed: %s", e)
+
+    async def _save_event_meta(self, event: TranscriptEvent) -> None:
+        """Best effort: event rows are append-only; re-insert is skipped on conflict."""
+        save = getattr(self.c.repo, "update_event_meta", None)
+        if save:
+            try:
+                await save(event.id, event.meta)
+            except Exception as e:  # noqa: BLE001
+                log.warning("persist event meta failed: %s", e)
+
+    async def _nudge_status(self, ids: list[str], status: str, applied_in: str | None = None
+                            ) -> None:
+        for e in self.events:
+            if e.id in ids:
+                e.meta["status"] = status
+                if applied_in:
+                    e.meta["applied_in"] = applied_in
+                await self.emit({"type": "instruction.status", "id": e.id, "status": status,
+                                 "applied_in": applied_in})
+                self._bg_task(self._save_event_meta(e))
+        self.queued_nudges = [i for i in self.queued_nudges if i not in ids]
 
     async def system(self, text: str, **meta) -> None:
         await self.add_event(TranscriptEvent(conversation_id=self.conv.id, speaker=Speaker.system,
@@ -242,6 +277,8 @@ class LiveSession:
         except asyncio.CancelledError:
             event.meta["interrupted"] = True
             await self.emit({"type": "audio.stop", "turn_id": event.id})
+            await self.emit({"type": "transcript.update", "id": event.id, "meta": event.meta})
+            self._bg_task(self._save_event_meta(event))
             raise
         finally:
             self.speaking_turn = None
@@ -343,19 +380,37 @@ class LiveSession:
             await self.error(f"Could not generate the outcome report: {e}")
 
     # ---- agent turns ---------------------------------------------------------------------
-    def _inputs(self, directive: str | None, is_opening: bool = False) -> TurnInputs:
+    def _inputs(self, directive: str | None, is_opening: bool = False,
+                allow_hold: bool = False) -> TurnInputs:
         return TurnInputs(spec=self.spec, brief=self.mission.brief, profile=self.profile,
                           negotiation=self.negotiation, events=self.events,
-                          instructions=self.instructions[-MAX_INSTRUCTIONS:],
+                          new_instructions=[t for i, t in self.instructions
+                                            if i in self.queued_nudges],
+                          standing_instructions=[t for i, t in self.instructions
+                                                 if i not in self.queued_nudges
+                                                 ][-MAX_INSTRUCTIONS:],
                           approved_disclosures=dict(self.approved_disclosures),
                           authorised_amounts=set(self.authorised_amounts), directive=directive,
-                          is_opening=is_opening, commitment_approved=self.commitment_approved)
+                          is_opening=is_opening, commitment_approved=self.commitment_approved,
+                          allow_hold=allow_hold)
 
-    async def run_agent_turn(self, directive: str | None = None, is_opening: bool = False) -> None:
-        self.respond_after_speech = False
+    async def run_agent_turn(self, directive: str | None = None, is_opening: bool = False,
+                             allow_hold: bool = False) -> None:
+        self.respond_after_speech = None
+        self._turn_args = (directive, allow_hold)
+        nudges = list(self.queued_nudges)
         await self.set_state(S.thinking)
-        decision = await plan_turn(self.llm, self._inputs(directive, is_opening))
+        decision = await plan_turn(self.llm, self._inputs(directive, is_opening, allow_hold))
         plan = decision.plan
+        if plan.hold:
+            self.negotiation = merge_delta(self.negotiation, plan.state_delta, self.turn_no)
+            await self.emit_negotiation()
+            await self._nudge_status(nudges, "noted")
+            if self.paused or self.takeover_active:
+                await self.set_state(S.paused)
+            else:
+                await self.channel.after_agent_turn(self)
+            return
         self.turn_no += 1
         self.negotiation = merge_delta(self.negotiation, plan.state_delta, self.turn_no)
         self.approved_disclosures.clear()  # disclosures are approved for a single turn
@@ -378,24 +433,32 @@ class LiveSession:
                              "approval": approval.model_dump(mode="json")})
             await self.emit_negotiation()
             return
-        await self.speak_agent_plan(plan)
+        await self.speak_agent_plan(plan, nudges)
 
-    async def speak_agent_plan(self, plan: TurnPlan) -> None:
+    async def speak_agent_plan(self, plan: TurnPlan, nudges: list[str] | None = None) -> None:
         for offer in plan.offers_made:
             offer.by, offer.turn = "agent", self.turn_no
             self.negotiation.offers_made.append(offer)
         if plan.objective_met:
             self.negotiation.objective_met = True
         await self.emit_negotiation()
-        await self.speak(Speaker.agent, plan.response_text, plan.response_language)
+        spoken = await self.speak(Speaker.agent, plan.response_text, plan.response_language)
+        if nudges:
+            spoken.meta["nudges"] = nudges
+            await self.emit({"type": "transcript.update", "id": spoken.id, "meta": spoken.meta})
+            await self._nudge_status(nudges, "applied", applied_in=spoken.id)
         if plan.end_conversation:
             await self.finish("The agent closed the conversation.")
             return
         if self._counterparty_left():
             await self.finish("The counterparty ended the conversation.")
             return
-        if self.respond_after_speech and not self.paused:
-            await self.run_agent_turn(directive=INTERVENTION_DIRECTIVE)
+        follow_up = self.respond_after_speech
+        if follow_up and not (self.paused or self.takeover_active):
+            if follow_up == "reply":
+                await self.run_agent_turn()
+            else:
+                await self.run_agent_turn(directive=NUDGE_DIRECTIVE, allow_hold=True)
             return
         if self.paused or self.takeover_active:
             await self.set_state(S.paused)
@@ -448,32 +511,57 @@ class LiveSession:
             meta={"utterance_id": utterance_id} if utterance_id else {}))
         if self.task_kind == "agent" and self.task and not self.task.done() \
                 and self.state == S.speaking:
-            self.respond_after_speech = True  # answer once the current line finishes
+            self.respond_after_speech = "reply"  # answer once the current line finishes
             return
         self.schedule(self.handle_counterparty_turn(), kind="agent")
 
     # ---- principal controls --------------------------------------------------------------
-    async def intervene(self, text: str) -> None:
+    async def intervene(self, text: str, urgent: bool = False) -> None:
+        """A typed nudge from the principal while the conversation runs.
+
+        Normal nudges never cut anyone off: they apply to the agent's next line (and the
+        agent may act on them straight away if it is idle). Urgent nudges stop whatever is
+        being said or composed and make the agent act now.
+        """
         text = text.strip()
         if not text or self.state in (S.completed, S.failed):
             return
-        await self.add_event(TranscriptEvent(conversation_id=self.conv.id, speaker=Speaker.user,
-                                             kind=EventKind.instruction, text=text))
+        event = await self.add_event(TranscriptEvent(
+            conversation_id=self.conv.id, speaker=Speaker.user, kind=EventKind.instruction,
+            text=text, meta={"status": "queued", "urgent": urgent}))
         if TAKEOVER_RE.search(text):
+            await self._nudge_status([event.id], "noted")
             await self.take_over()
             return
-        if PAUSE_RE.search(text) and len(text) < 40:
+        if PAUSE_RE.search(text):
+            await self._nudge_status([event.id], "noted")
             await self.pause()
             return
-        self.instructions.append(text)
+        self.instructions.append((event.id, text))
+        self.queued_nudges.append(event.id)
         self.authorised_amounts |= set(extract_amounts(text))
+        await self.emit({"type": "instruction.status", "id": event.id, "status": "queued",
+                         "applied_in": None})
         if self.paused or self.takeover_active or self.state == S.awaiting_approval:
+            return  # applied on the first turn after resuming / deciding
+        running = self.task is not None and not self.task.done()
+        if urgent:
+            await self._cancel_task()
+            self.schedule(self.run_agent_turn(directive=NUDGE_DIRECTIVE, allow_hold=True),
+                          kind="agent")
             return
-        if self.state == S.speaking or (self.state == S.listening and self.task_kind == "simulator"
-                                        and self.speaking_turn):
-            self.respond_after_speech = True
+        if self.state == S.thinking and self.task_kind == "agent" and running:
+            directive, allow_hold = self._turn_args
+            self.schedule(self.run_agent_turn(directive=directive, allow_hold=allow_hold),
+                          kind="agent")  # replan so the line about to be said includes it
             return
-        self.schedule(self.run_agent_turn(directive=INTERVENTION_DIRECTIVE), kind="agent")
+        if self.task_kind == "simulator" and running:
+            return  # the agent's reply to the other side will apply it
+        if self.state in (S.speaking, S.connecting) and running:
+            self.respond_after_speech = self.respond_after_speech or "nudge"
+            return
+        self.schedule(self.run_agent_turn(directive=NUDGE_DIRECTIVE, allow_hold=True),
+                      kind="agent")
 
     async def pause(self) -> None:
         if self.paused or self.state in (S.completed, S.failed, S.ready, S.connecting):
@@ -500,15 +588,16 @@ class LiveSession:
         if any(a.status == ApprovalStatus.pending for a in self.approvals.values()):
             await self.set_state(S.awaiting_approval)
             return
-        speech = [e for e in self.events if e.kind in (EventKind.speech, EventKind.instruction)]
+        speech = [e for e in self.events if e.kind == EventKind.speech]
         last = speech[-1] if speech else None
         if last is None:
             await self.set_state(S.connecting)
             self.schedule(self._open(), kind="agent")
-        elif last.speaker == Speaker.counterparty or last.kind == EventKind.instruction:
-            self.schedule(self.run_agent_turn(
-                directive=INTERVENTION_DIRECTIVE if last.kind == EventKind.instruction else None),
-                kind="agent")
+        elif last.speaker == Speaker.counterparty:
+            self.schedule(self.run_agent_turn(), kind="agent")
+        elif self.queued_nudges:
+            self.schedule(self.run_agent_turn(directive=NUDGE_DIRECTIVE, allow_hold=True),
+                          kind="agent")
         elif self.conv.mode == ConversationMode.simulated:
             self.schedule(self.run_simulator_turn(), kind="simulator")
         else:
@@ -571,7 +660,7 @@ class LiveSession:
         self.negotiation.approval_required = any(
             a.status == ApprovalStatus.pending for a in self.approvals.values())
         if res.instruction:
-            self.instructions.append(res.instruction)
+            self.instructions.append((None, res.instruction))
             self.authorised_amounts |= set(extract_amounts(res.instruction))
         if res.disclose_key:
             f = self.profile.field(res.disclose_key)

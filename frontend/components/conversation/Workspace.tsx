@@ -19,20 +19,24 @@ import {
   Square,
   UserRoundCheck,
   X,
+  Zap,
 } from "lucide-react";
 import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useConversation } from "@/hooks/useConversation";
 import { useWakeLock } from "@/hooks/useWakeLock";
-import type { ConversationState } from "@/types/api";
+import type { ConversationState, TranscriptEvent } from "@/types/api";
+import { makeProgress } from "@/hooks/useSpokenProgress";
 import { STATE_LABEL } from "@/lib/format";
 import { AgentOrb } from "@/components/orb/AgentOrb";
-import { Transcript } from "@/components/transcript/Transcript";
+import { Transcript, type Activity } from "@/components/transcript/Transcript";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { ApprovalSheet } from "./ApprovalSheet";
 import { MissionStatePanel } from "./MissionStatePanel";
+
+const QUICK_NUDGES = ["Be firmer", "Slow down", "Don't reveal my budget", "Ask about other terms", "Wrap up politely"];
 
 const LIVE: ConversationState[] = ["connecting", "listening", "thinking", "speaking", "interrupted"];
 
@@ -109,7 +113,7 @@ function Control({
 export function Workspace({ id }: { id: string }) {
   const router = useRouter();
   const audio = useAudioEngine();
-  const { view, send, sendAudio, dismissError } = useConversation(id, {
+  const { view, send, sendAudio, dismissError, timingRef } = useConversation(id, {
     onAudio: (turn, b64, rate) => audio.enqueue(turn, b64, rate),
     onAudioEnd: (turn) => audio.endTurn(turn, () => send({ type: "playback_done", turn_id: turn })),
     onAudioStop: () => audio.stopAll(),
@@ -199,15 +203,41 @@ export function Workspace({ id }: { id: string }) {
     audio.stopMic();
     send({ type: "end" });
   };
-  const submit = async () => {
+  const nudge = async (t: string, urgent = false) => {
+    await audio.unlock();
+    if (urgent) audio.stopAll(); // cut in immediately; the server confirms with audio.stop
+    send({ type: "intervene", text: t, urgent });
+  };
+  const submit = async (urgent = false) => {
     const t = text.trim();
     if (!t) return;
-    await audio.unlock();
-    if (takeover) send({ type: "say", text: t });
-    else if (inputMode === "counterparty") send({ type: "counterparty_text", text: t });
-    else send({ type: "intervene", text: t });
+    if (takeover) {
+      await audio.unlock();
+      send({ type: "say", text: t });
+    } else if (inputMode === "counterparty") send({ type: "counterparty_text", text: t });
+    else await nudge(t, urgent);
     setText("");
+    inputRef.current?.focus(); // keep typing: several nudges in a row is normal
   };
+
+  // Live transcript: lines received during this session reveal as they are spoken.
+  const progressFor = useCallback(
+    (e: TranscriptEvent) => makeProgress(e, timingRef.current, audio.progress),
+    [timingRef, audio.progress],
+  );
+  const lastSpeech = [...view.events].reverse().find((e) => e.kind === "speech");
+  const activity: Activity | null =
+    takeover || finished || !started
+      ? null
+      : state === "thinking"
+        ? { label: "Agent is thinking…", state: "thinking" }
+        : mode === "simulated" && state === "listening" && lastSpeech && lastSpeech.speaker !== "counterparty"
+          ? { label: `${cpLabel} is responding…`, state: "listening" }
+          : null;
+  const lastNudge = [...view.events].reverse().find((e) => e.kind === "instruction");
+  const nudgeQueued = lastNudge?.meta?.status === "queued";
+  const someoneSpeaking = state === "speaking" || (mode === "simulated" && state === "listening");
+  const canNudge = !takeover && inputMode === "instruct";
 
   useEffect(() => {
     if (view.report) {
@@ -220,7 +250,7 @@ export function Workspace({ id }: { id: string }) {
     ? "Type what you want to say. The agent's voice speaks it."
     : inputMode === "counterparty"
       ? `Type what the ${cpLabel.toLowerCase()} said`
-      : "Tell the agent what to do";
+      : "Nudge the agent…";
 
   const spec = view.mission?.spec;
 
@@ -275,18 +305,26 @@ export function Workspace({ id }: { id: string }) {
       </header>
 
       {/* Body */}
-      <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[18rem_minmax(0,1fr)_minmax(0,26rem)] lg:grid-rows-1">
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[18rem_minmax(0,1fr)_minmax(0,26rem)] lg:grid-rows-1">
         <aside className="hidden overflow-y-auto border-r border-line/70 p-5 lg:block" aria-label="Mission state">
           {spec && <MissionStatePanel spec={spec} n={view.negotiation} />}
         </aside>
 
         {/* Orb stage */}
         <section className="flex flex-col items-center justify-center px-4 pt-3 lg:pt-0" aria-label="Agent">
-          <div className="relative aspect-square w-[min(58vw,15rem)] sm:w-[min(40vh,18rem)] lg:w-[min(52vh,26rem)]">
+          <div
+            className={cn(
+              "relative aspect-square transition-[width] duration-500 lg:w-[min(52vh,26rem)]",
+              // Once talking starts, the transcript needs the room on small screens.
+              started && !finished ? "w-[min(34vw,8.5rem)] sm:w-[min(28vh,14rem)]" : "w-[min(58vw,15rem)] sm:w-[min(40vh,18rem)]",
+            )}
+          >
             <AgentOrb state={takeover ? "paused" : state} levelRef={audio.levelRef} />
           </div>
-          <p className="mt-1 min-h-10 max-w-[34ch] text-center text-body text-ink-2" aria-live="polite">
-            {statusLine(state, mode, takeover, cpLabel)}
+          <p className="mt-1 min-h-6 max-w-[34ch] text-center text-meta text-ink-2 sm:min-h-10 sm:text-body" aria-live="polite">
+            {nudgeQueued && !paused && state !== "awaiting_approval"
+              ? "Got it. The agent will use this on its next line."
+              : statusLine(state, mode, takeover, cpLabel)}
           </p>
           {audio.micStatus === "denied" && (
             <p className="mt-1 text-center text-meta text-error">Microphone blocked. Allow it in your browser settings, or type what they say.</p>
@@ -296,8 +334,15 @@ export function Workspace({ id }: { id: string }) {
         </section>
 
         {/* Transcript + input */}
-        <section className="flex min-h-0 flex-col border-line/70 lg:border-l" aria-label="Transcript">
-          <Transcript events={view.events} partials={view.partials} counterpartyLabel={cpLabel} className="flex-1 px-3 sm:px-5" />
+        <section className="flex min-h-0 min-w-0 flex-col border-line/70 lg:border-l" aria-label="Transcript">
+          <Transcript
+            events={view.events}
+            partials={view.partials}
+            counterpartyLabel={cpLabel}
+            progressFor={progressFor}
+            activity={activity}
+            className="flex-1 px-3 sm:px-5"
+          />
           {!finished && started && (
             <form
               className="shrink-0 border-t border-line/70 px-3 py-2 sm:px-5"
@@ -306,6 +351,20 @@ export function Workspace({ id }: { id: string }) {
                 submit();
               }}
             >
+              {canNudge && (
+                <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] sm:-mx-5 sm:px-5" aria-label="Quick nudges">
+                  {QUICK_NUDGES.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => nudge(q)}
+                      className="min-h-8 shrink-0 whitespace-nowrap rounded-full border border-line px-3 text-[12px] text-ink-2 transition-colors hover:border-ink-3 hover:text-ink"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
               {mode === "live" && !takeover && (
                 <div className="mb-1.5 flex gap-1" role="radiogroup" aria-label="Who is typing">
                   {(["instruct", "counterparty"] as const).map((m) => (
@@ -344,7 +403,24 @@ export function Workspace({ id }: { id: string }) {
                     takeover && "border-ink-2/60",
                   )}
                 />
-                <Button type="submit" size="icon" className="size-11 shrink-0 rounded-xl" disabled={!text.trim()} aria-label="Send">
+                {canNudge && someoneSpeaking && text.trim() && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="h-11 shrink-0 rounded-xl px-3 text-meta"
+                    onClick={() => submit(true)}
+                    title="Stop what's being said and act on this now"
+                  >
+                    <Zap className="size-4 text-warning" /> Send now
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  size="icon"
+                  className="size-11 shrink-0 rounded-xl"
+                  disabled={!text.trim()}
+                  aria-label={canNudge ? "Send nudge" : "Send"}
+                >
                   <Send className="size-4" />
                 </Button>
               </div>

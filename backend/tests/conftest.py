@@ -2,11 +2,13 @@ import pytest
 
 from app.core.config import Settings
 from app.core.deps import Container, set_container
-from app.models.mission import MissionSpec, PreparationBrief, Quantity
+from app.models.conversation import Conversation, ConversationMode
+from app.models.mission import Mission, MissionSpec, MissionStatus, PreparationBrief, Quantity  # noqa: F811
 from app.models.principal import Disclosure, PrincipalProfile, ProfileField
 from app.providers.llm.demo import DemoLLM
 from app.providers.stt.sarvam import SarvamSTT
 from app.providers.tts.sarvam import SarvamTTS
+from app.realtime.session import LiveSession
 from app.repositories.memory import MemoryRepository
 
 RENT_REQUEST = (
@@ -62,3 +64,18 @@ def rent_spec() -> MissionSpec:
 def brief() -> PreparationBrief:
     return PreparationBrief(opening_statement="Hello, I'm an AI assistant calling on behalf of "
                                               "Ananya about the rent.")
+
+
+@pytest.fixture
+def make_session(container, profile, rent_spec, brief):
+    def _make(llm, mode=ConversationMode.live) -> LiveSession:
+        c = Container(settings=container.settings, llm=llm, stt=container.stt,
+                      tts=container.tts, repo=container.repo)
+        mission = Mission(principal_id=profile.id, raw_input="x", spec=rent_spec, brief=brief,
+                          status=MissionStatus.prepared)
+        conv = Conversation(mission_id=mission.id, mode=mode, voice_enabled=False)
+        s = LiveSession(c, conv, mission, profile, [], [])
+        s.voice_enabled = False
+        s.pace_text = False
+        return s
+    return _make

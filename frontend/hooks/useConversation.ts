@@ -131,6 +131,23 @@ function reducer(s: ConversationView, action: Action): ConversationView {
         partials: uid ? s.partials.filter((p) => p.id !== uid) : s.partials,
       };
     }
+    case "transcript.update": {
+      const id = m.id as string;
+      const meta = m.meta as Record<string, unknown>;
+      const i = s.events.findIndex((e) => e.id === id);
+      if (i === -1) return s;
+      const events = s.events.slice();
+      events[i] = { ...events[i], meta: { ...events[i].meta, ...meta } };
+      return { ...s, events };
+    }
+    case "instruction.status": {
+      const id = m.id as string;
+      const i = s.events.findIndex((e) => e.id === id);
+      if (i === -1) return s;
+      const events = s.events.slice();
+      events[i] = { ...events[i], meta: { ...events[i].meta, status: m.status, applied_in: m.applied_in ?? events[i].meta.applied_in } };
+      return { ...s, events };
+    }
     case "negotiation_state":
       return { ...s, negotiation: m.negotiation as NegotiationState };
     case "approval.request":
@@ -163,6 +180,11 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
   const handlersRef = useRef(handlers);
   const retryRef = useRef(0);
   const closedByUs = useRef(false);
+  // Client-side timing for the live transcript: when each line arrived, and when it was cut off.
+  const timingRef = useRef<{ arrived: Map<string, number>; interrupted: Map<string, number> }>({
+    arrived: new Map(),
+    interrupted: new Map(),
+  });
 
   useEffect(() => {
     handlersRef.current = handlers;
@@ -192,6 +214,10 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
         if (msg.type === "audio.end") return h.onAudioEnd?.(msg.turn_id as string);
         if (msg.type === "audio.stop") return h.onAudioStop?.(msg.turn_id as string);
         if (msg.type === "pong") return;
+        const now = performance.now();
+        if (msg.type === "transcript.final") timingRef.current.arrived.set((msg.event as TranscriptEvent).id, now);
+        if (msg.type === "transcript.update" && (msg.meta as Record<string, unknown>)?.interrupted)
+          timingRef.current.interrupted.set(msg.id as string, now);
         dispatch({ type: "msg", msg });
       };
       ws.onclose = (e) => {
@@ -230,5 +256,5 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
 
   const dismissError = useCallback((id: number) => dispatch({ type: "dismiss", id }), []);
 
-  return { view, send, sendAudio, dismissError };
+  return { view, send, sendAudio, dismissError, timingRef };
 }

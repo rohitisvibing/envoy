@@ -65,6 +65,13 @@ class MemoryRepository(Repository):
     async def add_event(self, event):
         self.events.setdefault(event.conversation_id, []).append(event)
 
+    async def update_event_meta(self, event_id, meta):
+        for events in self.events.values():
+            for e in events:
+                if e.id == event_id:
+                    e.meta = dict(meta)
+                    return
+
     async def list_events(self, conversation_id):
         return list(self.events.get(conversation_id, []))
 

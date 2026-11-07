@@ -36,10 +36,14 @@ def test_full_flow_demo(container):
                               and x["event"]["speaker"] == "agent")
         assert "₹30,000" in msg["event"]["text"]
         ws.send_json({"type": "intervene", "text": "Ask if he can include maintenance at ₹32,000."})
-        msg, _ = _drain_until(ws, lambda x: x["type"] == "transcript.final"
-                              and x["event"]["speaker"] == "agent")
+        msg, seen = _drain_until(ws, lambda x: x["type"] == "transcript.final"
+                                 and x["event"]["speaker"] == "agent")
         assert "maintenance" in msg["event"]["text"]
-        _drain_until(ws, lambda x: x["type"] == "state" and x["state"] == "listening")
+        _, more = _drain_until(ws, lambda x: x["type"] == "state" and x["state"] == "listening")
+        statuses = [m["status"] for m in seen + more if m["type"] == "instruction.status"]
+        assert statuses == ["queued", "applied"]
+        applied = next(m for m in more if m["type"] == "instruction.status")
+        assert applied["applied_in"] == msg["event"]["id"]
         ws.send_json({"type": "counterparty_text", "text": "Okay, ₹32,000 with maintenance."})
         req, _ = _drain_until(ws, lambda x: x["type"] == "approval.request")
         assert req["approval"]["kind"] == "final_commitment"

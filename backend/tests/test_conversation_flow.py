@@ -2,19 +2,14 @@
 
 import asyncio
 
-import pytest
-
-from app.core.deps import Container
 from app.models.conversation import (
     ApprovalDecision,
     ApprovalStatus,
-    Conversation,
     ConversationMode,
 )
 from app.models.conversation import (
     ConversationState as S,
 )
-from app.models.mission import Mission, MissionStatus
 from app.models.transcript import EventKind, Speaker
 from app.realtime.session import LiveSession
 
@@ -37,21 +32,6 @@ async def settle(session: LiveSession, timeout: float = 2.0):
             if session.task is None or session.task.done():
                 return
     raise AssertionError(f"session did not settle; state={session.state}")
-
-
-@pytest.fixture
-def make_session(container, profile, rent_spec, brief):
-    def _make(llm: ScriptedLLM, mode=ConversationMode.live) -> LiveSession:
-        c = Container(settings=container.settings, llm=llm, stt=container.stt,
-                      tts=container.tts, repo=container.repo)
-        mission = Mission(principal_id=profile.id, raw_input="x", spec=rent_spec, brief=brief,
-                          status=MissionStatus.prepared)
-        conv = Conversation(mission_id=mission.id, mode=mode, voice_enabled=False)
-        s = LiveSession(c, conv, mission, profile, [], [])
-        s.voice_enabled = False
-        s.pace_text = False
-        return s
-    return _make
 
 
 async def test_opening_then_text_and_voice_share_one_context(make_session):
@@ -85,7 +65,7 @@ async def test_intervention_takes_priority_and_triggers_a_turn(make_session):
     await s.resume()
     await settle(s)
     prompt = llm.last_prompt("turn")
-    assert "PRINCIPAL INSTRUCTIONS" in prompt and "maintenance" in prompt
+    assert "NEW FROM THE PRINCIPAL" in prompt and "maintenance" in prompt
     assert s.events[-1].text.startswith("Could maintenance")
 
 

@@ -59,12 +59,14 @@ class TurnInputs:
     profile: PrincipalProfile
     negotiation: NegotiationState
     events: list[TranscriptEvent]
-    instructions: list[str]
+    new_instructions: list[str] = field(default_factory=list)
+    standing_instructions: list[str] = field(default_factory=list)
     approved_disclosures: dict[str, str] = field(default_factory=dict)
     authorised_amounts: set[float] = field(default_factory=set)
     directive: str | None = None
     is_opening: bool = False
     commitment_approved: bool = False
+    allow_hold: bool = False
 
 
 @dataclass
@@ -110,11 +112,21 @@ async def plan_turn(llm: LLMProvider, inputs: TurnInputs) -> TurnDecision:
         user = turn_context(
             spec=inputs.spec, brief=inputs.brief, profile=inputs.profile,
             negotiation=inputs.negotiation, events=inputs.events,
-            active_instructions=inputs.instructions,
+            new_instructions=inputs.new_instructions,
+            standing_instructions=inputs.standing_instructions,
             approved_disclosures=inputs.approved_disclosures, extra_directive=directive)
         plan = await llm.complete_json(
             TurnPlan, [Message("system", prompts.AGENT_TURN), Message("user", user)],
             task="turn", role="conversation")
+        if plan.hold or not plan.response_text.strip():
+            if inputs.allow_hold:
+                plan.hold, plan.response_text = True, ""
+                plan.offers_made, plan.accepts_offer, plan.needs_approval = [], False, None
+                return TurnDecision(plan=plan, guard=GuardResult(Action.allow, plan=plan))
+            directive = ((inputs.directive + "\n") if inputs.directive else "") + (
+                "You must say something this turn; hold is not allowed.")
+            guard = GuardResult(Action.regenerate, plan=plan)
+            continue
         guard = check_turn(
             plan, inputs.spec, inputs.profile,
             counterparty_amounts=counterparty_numbers(cp_texts),
@@ -129,6 +141,9 @@ async def plan_turn(llm: LLMProvider, inputs: TurnInputs) -> TurnDecision:
             "Your previous draft was rejected by the safety check: " + guard.feedback()
             + ". Rewrite it to comply.")
     assert plan is not None and guard is not None
+    if guard.action == Action.regenerate and not plan.response_text.strip():
+        plan.response_text = "Sorry, could you say that again?"
+        guard = GuardResult(Action.allow, plan=plan)
     if guard.action == Action.regenerate:
         # Second draft still unsafe: never speak it. Fall back to a safe deferral.
         plan.response_text = ("I'll need to check that with the person I'm representing "

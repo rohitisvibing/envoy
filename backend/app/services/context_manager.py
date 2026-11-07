@@ -80,7 +80,8 @@ def turn_context(
     profile: PrincipalProfile,
     negotiation: NegotiationState,
     events: list[TranscriptEvent],
-    active_instructions: list[str],
+    new_instructions: list[str],
+    standing_instructions: list[str],
     approved_disclosures: dict[str, str] | None = None,
     extra_directive: str | None = None,
 ) -> str:
@@ -97,9 +98,12 @@ def turn_context(
              "walk_away": brief.walk_away_conditions}, ensure_ascii=False))
     parts.append("CURRENT NEGOTIATION STATE:\n"
                  + negotiation.model_dump_json(exclude={"approval_required"}))
-    if active_instructions:
-        parts.append("PRINCIPAL INSTRUCTIONS (highest priority, most recent last):\n- "
-                     + "\n- ".join(active_instructions))
+    if standing_instructions:
+        parts.append("STANDING PRINCIPAL INSTRUCTIONS (keep following these, most recent last):\n- "
+                     + "\n- ".join(standing_instructions))
+    if new_instructions:
+        parts.append("NEW FROM THE PRINCIPAL SINCE YOUR LAST LINE (highest priority, act on "
+                     "these now):\n- " + "\n- ".join(new_instructions))
     parts.append("RECENT TRANSCRIPT:\n" + transcript_context(events))
     if extra_directive:
         parts.append("DIRECTIVE FOR THIS TURN:\n" + extra_directive)

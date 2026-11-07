@@ -4,13 +4,14 @@ Client -> server
   binary frames: mono PCM16 @16 kHz microphone audio (live mode)
   JSON: {"type": "start"|"pause"|"resume"|"interrupt"|"end"|"mute"|"unmute"|"takeover"
                  |"release"|"ping"}
-        {"type": "intervene", "text"}            principal instruction
+        {"type": "intervene", "text", "urgent"?}  principal nudge (urgent cuts in now)
         {"type": "say", "text"}                  takeover: relay text in the agent's voice
         {"type": "counterparty_text", "text"}    live mode: type what the other party said
         {"type": "approval", "id", "decision", "alternative_text"}
         {"type": "playback_done", "turn_id"}
 Server -> client
-  snapshot, state, transcript.partial, transcript.final, audio, audio.end, audio.stop,
+  snapshot, state, transcript.partial, transcript.final, transcript.update (meta patch),
+  instruction.status {id, status: queued|applied|noted, applied_in}, audio, audio.end, audio.stop,
   negotiation_state, approval.request, approval.resolved, report.pending, report.ready,
   error, pong
 """
@@ -99,7 +100,7 @@ async def _dispatch(session, p: dict, sink) -> None:
         case "release":
             await session.release()
         case "intervene":
-            await session.intervene(str(p.get("text", ""))[:2000])
+            await session.intervene(str(p.get("text", ""))[:2000], urgent=bool(p.get("urgent")))
         case "say":
             await session.principal_say(str(p.get("text", ""))[:2000])
         case "counterparty_text":

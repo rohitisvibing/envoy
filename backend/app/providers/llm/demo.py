@@ -32,7 +32,7 @@ _LANGS = ["Kannada", "Hindi", "Tamil", "Telugu", "Malayalam", "Marathi", "Bengal
 
 
 def _section(text: str, name: str) -> str:
-    m = re.search(rf"{name}:\n(.*?)(?:\n\n[A-Z][A-Z ()\-]+:\n|\Z)", text, re.DOTALL)
+    m = re.search(rf"{name}[^\n]*:\n(.*?)(?:\n\n[A-Z][A-Z ()\-,]+:\n|\Z)", text, re.DOTALL)
     return m.group(1) if m else ""
 
 
@@ -154,7 +154,9 @@ class DemoLLM(LLMProvider):
         limit = float(limit_m.group(1)) if limit_m else target
         made = re.findall(r'"by":\s*"agent",\s*"amount":\s*([\d.]+)', user)
         last_offer = float(made[-1]) if made else None
-        instructions = _section(user, "PRINCIPAL INSTRUCTIONS \\(highest priority, most recent last\\)")
+        instructions = _section(user, "NEW FROM THE PRINCIPAL")
+        newest = (instructions.strip().splitlines()[-1].strip("- ").strip()
+                  if instructions.strip() else "")
         directive = _section(user, "DIRECTIVE FOR THIS TURN")
         delta = StateDelta(phase="negotiating")
         if their:
@@ -173,10 +175,15 @@ class DemoLLM(LLMProvider):
                             response_text="Thank you, that works for us. We'll confirm the "
                                           "paperwork shortly. Goodbye!",
                             objective_met=True, end_conversation=True)
-        if instructions and "new instruction" in directive.lower():
-            amt = extract_amounts(instructions.splitlines()[-1])
+        if newest and "holding is allowed" in directive.lower() and re.search(
+                r"\b(firm|assertive|slow|don'?t|do not|never|avoid|stop|polite|calm|patient)", newest,
+                re.I):
+            return TurnPlan(state_delta=StateDelta(next_action=f"Keep in mind: {newest}"),
+                            hold=True)
+        if newest and "new instruction" in directive.lower():
+            amt = extract_amounts(newest)
             ask = re.sub(r"^(ask|tell|say)\s+(him|her|them)?\s*(if|whether|to)?\s*", "",
-                         instructions.splitlines()[-1].strip("- ").strip(), flags=re.IGNORECASE)
+                         newest, flags=re.IGNORECASE)
             text = (f"Would you consider ₹{amt[0]:,.0f} with maintenance included?"
                     if amt and "maintenance" in ask.lower()
                     else f"One more thing: could you {ask.rstrip('.?')}?")

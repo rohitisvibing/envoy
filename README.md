@@ -98,14 +98,36 @@ Text and voice go through one `LiveSession`: microphone PCM, typed counterparty 
 - **Client → server:**
   - Binary PCM16 at 16 kHz mono (live mic).
   - JSON control messages: `start`, `pause`, `resume`, `interrupt`, `end`, `mute`, `unmute`, `takeover`, `release`.
-  - `intervene{text}`: an instruction to the agent.
+  - `intervene{text, urgent?}`: a nudge to the agent (see below).
   - `say{text}`: in takeover, your words spoken in the agent's voice.
   - `counterparty_text{text}`, `approval{id,decision,alternative_text}`, `playback_done{turn_id}`.
 - **Server → client:**
   - `snapshot` on every connect, so reconnects resume the same session.
-  - `state`, `transcript.partial`, `transcript.final`, `negotiation_state`.
+  - `state`, `transcript.partial`, `transcript.final`, `transcript.update{id, meta}` (for example a line that was cut off), `negotiation_state`.
+  - `instruction.status{id, status: queued|applied|noted, applied_in}`.
   - `audio{turn_id, sample_rate, data}` (base64 PCM16), `audio.end`, `audio.stop`.
   - `approval.request`, `approval.resolved`, `report.pending`, `report.ready`, `error`.
+
+### Nudging a live conversation
+
+Type into the composer, or tap a quick nudge, at any point during the call. Nudges never pause the agent.
+
+- **Normal nudge:** nobody gets cut off. It is shown as *Queued* and applied to the agent's next line.
+  - If the agent is mid-line, it finishes first.
+  - If the other side is mid-reply, the agent's answer applies the nudge.
+  - If the agent is idle, it acts on it right away.
+  - Pure guidance ("be firmer", "don't reveal my budget") may be *Noted* without the agent saying anything. It stays in force for every later line.
+- **Send now (urgent):** stops whatever is being said or composed, and the agent acts on the nudge immediately.
+- **Applied nudges** link to the line they shaped, and that line is tagged "follows your nudge".
+
+The engine keeps *new* nudges, which are acted on now, separate from *standing* ones, which keep applying. Every nudged line still goes through the policy guard.
+
+### Live transcript
+
+- Agent and simulated-counterparty lines reveal word by word in step with audio playback. In text-only mode they follow the server's reading pace.
+- Lines cut off by an interruption, barge-in or urgent nudge show what was heard, with the unspoken remainder struck through.
+- Live-mode speech streams as partial transcripts.
+- Activity rows show when the agent is thinking or the other side is responding.
 
 ### Voice pipeline
 
@@ -118,7 +140,7 @@ Text and voice go through one `LiveSession`: microphone PCM, typed counterparty 
 ## Tests
 
 ```bash
-cd backend && uv run pytest          # 79 tests
+cd backend && uv run pytest          # 90 tests
 cd frontend && pnpm lint && pnpm exec tsc --noEmit && pnpm build
 ```
 
