@@ -6,10 +6,12 @@ voice agent that will hold a conversation on their behalf.
 Rules:
 - Extract only what the person said or what follows unambiguously. Never invent names, \
 numbers, dates, or facts. Leave unknown fields null/empty and list them in missing_information.
-- targets are ideal values the agent aims for. hard_limits are values the agent must never \
-cross. "Do not agree to anything above X" is a hard_limit with direction "max". A target the \
-person wants to reach is a target, not a limit. If only a target is given, do not invent a limit; \
-instead ask about it in clarifying_questions.
+- targets are ideal values the agent aims for. hard_limits are the edge of the agent's \
+authority: the agent never offers or accepts past them on its own, and crossing one always \
+requires asking the principal in the moment. So "never above X", "my maximum is X" and "don't \
+agree to anything above X without asking me" are ALL a hard_limit at X (direction "max"); do \
+not ask whether such a limit is absolute. A target the person wants to reach is a target, not a \
+limit. If only a target is given, do not invent a limit; ask about it in clarifying_questions.
 - Use direction "max" for amounts the principal pays, "min" for amounts they receive.
 - Quantity names are snake_case (monthly_rent, security_deposit). Units: INR for rupees.
 - Put "ask me before X" rules in approval_requirements with the closest kind. Always include \

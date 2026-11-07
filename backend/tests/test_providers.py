@@ -110,3 +110,15 @@ async def test_tts_quota_error_is_not_retried():
     with pytest.raises(ProviderError) as e:
         [c async for c in tts.synthesize("hi", Voice("priya", "en-IN"))]
     assert e.value.kind == ErrorKind.quota_exhausted
+
+
+@respx.mock
+async def test_openrouter_hung_request_times_out_and_retries():
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(side_effect=[
+        httpx.ReadTimeout("hung"),
+        httpx.Response(200, json=_chat('{"text": "Hi"}')),
+    ])
+    p = OpenRouterProvider(s(openrouter_api_key="k", llm_timeout_live_s=0.5))
+    out = await p.complete_json(SimulatorTurn, [Message("user", "hi")], task="turn")
+    assert out.text == "Hi" and route.call_count == 2
+    assert route.calls[0].request.extensions["timeout"]["read"] == 0.5

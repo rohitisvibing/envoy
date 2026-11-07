@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.4
     llm_max_tokens: int = 1800
     llm_timeout_s: float = 60.0
+    # Live turns (agent reply, simulated counterparty) must not hang the call: fail fast, retry.
+    llm_timeout_live_s: float = 20.0
 
     # Speech (Sarvam)
     sarvam_api_key: str = ""

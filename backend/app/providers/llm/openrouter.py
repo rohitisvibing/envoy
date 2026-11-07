@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 RETRY_STATUSES = {429, 500, 502, 503, 504}
+LIVE_TASKS = {"turn", "simulate", "persona"}
 
 
 def _parse_json(raw: str) -> dict:
@@ -48,7 +49,7 @@ class OpenRouterProvider(LLMProvider):
         return self._client
 
     async def _chat(self, messages: list[dict], *, role: Role, temperature, max_tokens,
-                    response_format: dict | None) -> str:
+                    response_format: dict | None, timeout: float | None = None) -> str:
         body: dict = {
             "model": self.settings.model_for(role),
             "messages": messages,
@@ -60,15 +61,21 @@ class OpenRouterProvider(LLMProvider):
         client = self._http()
         for attempt in range(self.max_retries + 1):
             try:
-                r = await client.post("/chat/completions", json=body)
+                r = await client.post("/chat/completions", json=body,
+                                      timeout=timeout or self.settings.llm_timeout_s)
             except httpx.HTTPError as e:
                 if attempt < self.max_retries:
-                    await asyncio.sleep(0.6 * 2**attempt)
+                    log.warning("OpenRouter %s (attempt %d); retrying", type(e).__name__,
+                                attempt + 1)
+                    await asyncio.sleep(0.3 * 2**attempt)
                     continue
                 raise ProviderError(ErrorKind.upstream, "Could not reach OpenRouter.",
                                     provider="OpenRouter", retryable=True) from e
             if r.status_code in RETRY_STATUSES and attempt < self.max_retries:
-                await asyncio.sleep(float(r.headers.get("retry-after") or 0.6 * 2**attempt))
+                wait = float(r.headers.get("retry-after") or 0.6 * 2**attempt)
+                log.warning("OpenRouter %s (attempt %d); retrying in %.1fs", r.status_code,
+                            attempt + 1, wait)
+                await asyncio.sleep(wait)
                 continue
             if r.status_code >= 400:
                 ra = r.headers.get("retry-after")
@@ -102,8 +109,10 @@ class OpenRouterProvider(LLMProvider):
         last_err: Exception | None = None
         for attempt in range(3):
             try:
-                raw = await self._chat(msgs, role=role, temperature=temperature,
-                                       max_tokens=max_tokens, response_format=fmt)
+                raw = await self._chat(
+                    msgs, role=role, temperature=temperature, max_tokens=max_tokens,
+                    response_format=fmt,
+                    timeout=self.settings.llm_timeout_live_s if task in LIVE_TASKS else None)
             except ProviderError as e:
                 # Some models reject json_schema; fall back to json_object once.
                 if fmt["type"] == "json_schema" and e.kind == ErrorKind.upstream \
