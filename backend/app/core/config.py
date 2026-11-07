@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # LLM (OpenRouter)
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
-    openrouter_model: str = "openai/gpt-5-mini"
+    openrouter_model: str = "anthropic/claude-sonnet-5.5"
     llm_model_extraction: str = ""
     llm_model_conversation: str = ""
     llm_model_simulator: str = ""
