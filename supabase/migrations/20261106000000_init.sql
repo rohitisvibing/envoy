@@ -99,12 +99,12 @@ create table if not exists outcome_reports (
 );
 
 -- updated_at maintenance
-create or replace function touch_updated_at() returns trigger language plpgsql as $$
+create or replace function envoy_touch_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at = now(); return new; end $$;
 
 drop trigger if exists principals_touch on principals;
 create trigger principals_touch before update on principals
-  for each row execute function touch_updated_at();
+  for each row execute function envoy_touch_updated_at();
 
 -- RLS: all access goes through the backend's service role for now. Enabling RLS with no
 -- policies means the anon key cannot read or write anything.
