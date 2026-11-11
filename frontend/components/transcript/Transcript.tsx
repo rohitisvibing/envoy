@@ -72,12 +72,14 @@ const Row = memo(function Row({
   progressFor,
   highlighted,
   onJump,
+  english,
 }: {
   e: TranscriptEvent;
   counterpartyLabel: string;
   progressFor: (e: TranscriptEvent) => ProgressFn | null;
   highlighted: boolean;
   onJump: (id: string) => void;
+  english: boolean;
 }) {
   const interrupted = Boolean(e.meta?.interrupted);
   // Created once per line, so the reveal doesn't restart when the row re-renders.
@@ -148,6 +150,12 @@ const Row = memo(function Row({
           <span className="sr-only">{name}: </span>
           {progress ? <LiveText text={e.text} progress={progress} interrupted={interrupted} /> : e.text}
         </p>
+        {english && typeof e.meta?.en === "string" && (
+          <p lang="en" className="mt-1 break-words text-body text-ink-2">
+            <span className="sr-only">In English: </span>
+            {e.meta.en}
+          </p>
+        )}
         <span
           className={cn(
             "mt-0.5 flex gap-2 text-[11px] text-ink-3 tabular",
@@ -170,6 +178,7 @@ export function Transcript({
   counterpartyLabel,
   progressFor,
   activity,
+  english = true,
   className,
 }: {
   events: TranscriptEvent[];
@@ -177,6 +186,7 @@ export function Transcript({
   counterpartyLabel: string;
   progressFor: (e: TranscriptEvent) => ProgressFn | null;
   activity: Activity | null;
+  english?: boolean;
   className?: string;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -237,7 +247,7 @@ export function Transcript({
           ) : (
             <ul className="pb-2">
               {events.map((e) => (
-                <Row key={e.id} e={e} counterpartyLabel={counterpartyLabel} progressFor={progressFor} highlighted={highlight === e.id} onJump={jump} />
+                <Row key={e.id} e={e} counterpartyLabel={counterpartyLabel} progressFor={progressFor} highlighted={highlight === e.id} onJump={jump} english={english} />
               ))}
               {partials.map((p) => (
                 <li key={p.id} className="flex justify-end py-2.5">

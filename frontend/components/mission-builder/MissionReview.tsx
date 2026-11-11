@@ -9,6 +9,7 @@ import { api } from "@/services/api";
 import type { ApprovalKind, Mission, MissionSpec, Quantity } from "@/types/api";
 import { APPROVAL_LABEL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { IconButton } from "@/components/ui/icon-button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
 import { DealLine, dealFrom } from "@/components/viz/DealLine";
@@ -225,6 +226,15 @@ export function MissionReview({ id }: { id: string }) {
 
       <fieldset disabled={locked} className="min-w-0">
         <dl className="mt-10">
+          <Fact label="Agent's name">
+            <input
+              aria-label="The name the agent introduces itself with"
+              placeholder="Unnamed"
+              value={spec.communication.agent_name ?? ""}
+              onChange={(e) => set("communication", { ...spec.communication, agent_name: e.target.value || null })}
+              className={cn(inline, "text-body")}
+            />
+          </Fact>
           <Fact label="With">
             <input
               aria-label="Who they're talking to"
@@ -323,6 +333,14 @@ export function MissionReview({ id }: { id: string }) {
                 <Block title="Success means">
                   <Lines items={spec.success_criteria} onChange={(v) => set("success_criteria", v)} add="Criterion" label="Criterion" />
                 </Block>
+                <label className="flex min-h-11 cursor-pointer items-center justify-between gap-4">
+                  <span className="text-body text-ink">Say it&apos;s an AI up front</span>
+                  <Switch
+                    checked={Boolean(spec.communication.announce_ai)}
+                    onCheckedChange={(v) => set("communication", { ...spec.communication, announce_ai: v })}
+                    aria-label="Say it's an AI up front"
+                  />
+                </label>
                 <Block title="Their name and language">
                   <div className="grid gap-1 sm:grid-cols-2">
                     <input

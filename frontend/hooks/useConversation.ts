@@ -191,23 +191,38 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
   });
 
   useEffect(() => {
+    // Each mount owns its connection. A socket from an earlier mount (React remounts in
+    // development) must never reconnect or deliver messages, or audio would play twice.
+    let disposed = false;
     closedByUs.current = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let ping: ReturnType<typeof setInterval> | undefined;
+    const seen = new Map<string, Set<number>>(); // audio chunks already queued, per turn
 
     const connect = () => {
+      if (disposed) return;
       const ws = new WebSocket(wsUrl(`/ws/conversations/${conversationId}`));
       wsRef.current = ws;
+      const current = () => !disposed && wsRef.current === ws;
       ws.onopen = () => {
+        if (!current()) return ws.close();
         retryRef.current = 0;
         dispatch({ type: "socket", status: "open" });
         ping = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ type: "ping" })), 20000);
       };
       ws.onmessage = (e) => {
-        if (typeof e.data !== "string") return;
+        if (typeof e.data !== "string" || !current()) return;
         const msg = JSON.parse(e.data) as ServerMsg;
         const h = handlersRef.current;
         if (msg.type === "audio") {
+          const turn = msg.turn_id as string;
+          const seq = msg.seq as number | undefined;
+          if (typeof seq === "number") {
+            const got = seen.get(turn) ?? new Set<number>();
+            if (got.has(seq)) return; // never queue the same chunk twice
+            got.add(seq);
+            seen.set(turn, got);
+          }
           h.onAudio?.(msg.turn_id as string, msg.data as string, msg.sample_rate as number, msg.speaker as Speaker);
           return;
         }
@@ -222,6 +237,7 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
       };
       ws.onclose = (e) => {
         clearInterval(ping);
+        if (!current()) return; // an old socket: its replacement is already running
         if (closedByUs.current || e.code === 4404) {
           dispatch({ type: "socket", status: "closed" });
           return;
@@ -233,6 +249,7 @@ export function useConversation(conversationId: string, handlers: AudioHandlers)
     };
     connect();
     return () => {
+      disposed = true;
       closedByUs.current = true;
       clearTimeout(timer);
       clearInterval(ping);

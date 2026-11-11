@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   ArrowUp,
   Hand,
+  Languages,
   ListChecks,
   Mic,
   MicOff,
@@ -22,6 +23,7 @@ import {
 import { useAudioEngine } from "@/hooks/useAudioEngine";
 import { useConversation } from "@/hooks/useConversation";
 import { useWakeLock } from "@/hooks/useWakeLock";
+import { useStoredFlag } from "@/hooks/useStoredFlag";
 import type { ConversationState, TranscriptEvent } from "@/types/api";
 import { makeProgress } from "@/hooks/useSpokenProgress";
 import { STATE_LABEL } from "@/lib/format";
@@ -66,6 +68,7 @@ export function Workspace({ id }: { id: string }) {
   const [stateOpen, setStateOpen] = useState(false);
   const [backgroundPaused, setBackgroundPaused] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [english, setEnglish] = useStoredFlag("envoy.english", true);
 
   const { state, takeover, paused, muted } = view;
   const mode = view.conversation?.mode;
@@ -206,6 +209,7 @@ export function Workspace({ id }: { id: string }) {
 
   const placeholder = takeover ? "Say it in the agent's voice…" : inputMode === "counterparty" ? `What ${cpLabel.toLowerCase()} said…` : "Nudge the agent…";
 
+  const hasEnglish = view.events.some((e) => typeof e.meta?.en === "string");
   const spec = view.mission?.spec;
   const deal = spec ? dealFrom(spec, view.negotiation) : null;
 
@@ -262,6 +266,15 @@ export function Workspace({ id }: { id: string }) {
             <TooltipContent>{detail}</TooltipContent>
           </Tooltip>
         )}
+        {hasEnglish && (
+          <IconButton
+            label={english ? "Hide English" : "Show English"}
+            icon={Languages}
+            size="sm"
+            active={english}
+            onClick={() => setEnglish(!english)}
+          />
+        )}
         <IconButton label="Mission" icon={ListChecks} size="sm" className="lg:hidden" onClick={() => setStateOpen(true)} />
       </header>
 
@@ -300,6 +313,7 @@ export function Workspace({ id }: { id: string }) {
             counterpartyLabel={cpLabel}
             progressFor={progressFor}
             activity={activity}
+            english={english}
             className={cn("flex-1 px-4 sm:px-6", finished && "pb-24")}
           />
           {!finished && begun && (

@@ -39,6 +39,10 @@ class Communication(Schema):
     languages: list[str] = Field(default_factory=lambda: ["English"])
     tone: str = "polite and clear"
     personality: str | None = None
+    agent_name: str | None = Field(
+        default=None, description="Name the agent introduces itself with, if the person gave one")
+    announce_ai: bool = Field(
+        default=False, description="Say up front that the caller is an AI assistant")
 
 
 class ApprovalRequirement(Schema):

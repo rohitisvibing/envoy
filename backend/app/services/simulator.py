@@ -44,5 +44,5 @@ async def next_turn(llm: LLMProvider, persona: SimulatorPersona,
         [Message("system", prompts.SIMULATOR_TURN),
          Message("user", "YOUR CHARACTER:\n" + persona.model_dump_json()
                  + "\n\nCONVERSATION SO FAR:\n" + transcript + "\n\nYour next reply.")],
-        task="simulate", role="simulator", temperature=0.7, max_tokens=400,
+        task="simulate", role="simulator", temperature=0.7, max_tokens=900,
     )

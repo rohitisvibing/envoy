@@ -2,13 +2,16 @@
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 
 import httpx
 import websockets
-from websockets.asyncio.client import connect
+from websockets.asyncio.client import ClientConnection, connect
+from websockets.protocol import State
 
 from app.core.config import Settings
 from app.core.errors import ErrorKind, ProviderError, from_http_status, missing_key
@@ -18,6 +21,7 @@ from .base import TTSProvider, Voice
 
 log = logging.getLogger(__name__)
 MAX_CHARS = 2000
+SPARE_MAX_AGE_S = 40  # a pre-opened socket older than this may have been closed upstream
 
 
 def strip_wav(data: bytes) -> bytes:
@@ -39,6 +43,8 @@ class SarvamTTS(TTSProvider):
     def __init__(self, settings: Settings) -> None:
         self.s = settings
         self.sample_rate = settings.sarvam_tts_sample_rate
+        self._spare: asyncio.Task[ClientConnection] | None = None
+        self._spare_at = 0.0
 
     def _key(self) -> str:
         if not self.s.sarvam_api_key:
@@ -77,11 +83,52 @@ class SarvamTTS(TTSProvider):
             log.warning("Sarvam TTS WS error %r; falling back to REST", e)
         yield await self._rest(text, voice, key)
 
-    async def _stream_ws(self, text: str, voice: Voice, key: str) -> AsyncIterator[bytes]:
+    # ---- connection warm-up: the next line starts without a WebSocket handshake ----------
+    async def _open(self, key: str) -> ClientConnection:
         url = f"{self.s.sarvam_ws_url}/text-to-speech/ws?model={self.s.sarvam_tts_model}" \
               "&send_completion_event=true"
-        async with connect(url, additional_headers={"api-subscription-key": key},
-                           open_timeout=8, max_size=None) as ws:
+        return await connect(url, additional_headers={"api-subscription-key": key},
+                             open_timeout=8, max_size=None)
+
+    def warm(self) -> None:
+        """Open a connection ahead of time for the next line (no-op without a key)."""
+        if not self.s.sarvam_api_key:
+            return
+        if self._spare and (not self._spare.done() or (
+                not self._spare.cancelled() and self._spare.exception() is None
+                and time.monotonic() - self._spare_at < SPARE_MAX_AGE_S)):
+            return
+        self._discard(self._spare)
+        self._spare = asyncio.create_task(self._open(self.s.sarvam_api_key))
+        self._spare_at = time.monotonic()
+
+    @staticmethod
+    def _discard(task: asyncio.Task | None) -> None:
+        if task is None:
+            return
+        if not task.done():
+            task.cancel()
+        elif not task.cancelled() and task.exception() is None:
+            asyncio.create_task(task.result().close())
+
+    async def _take(self, key: str) -> ClientConnection:
+        spare, self._spare = self._spare, None
+        ws: ClientConnection | None = None
+        if spare is not None and time.monotonic() - self._spare_at < SPARE_MAX_AGE_S:
+            with contextlib.suppress(Exception):
+                ws = await spare
+            if ws is not None and ws.state is not State.OPEN:
+                ws = None
+        else:
+            self._discard(spare)
+        if ws is None:
+            ws = await self._open(key)
+        self.warm()
+        return ws
+
+    async def _stream_ws(self, text: str, voice: Voice, key: str) -> AsyncIterator[bytes]:
+        ws = await self._take(key)
+        try:
             await ws.send(json.dumps({"type": "config", "data": {
                 "speaker": voice.speaker,
                 "target_language_code": voice.language_code,
@@ -110,6 +157,9 @@ class SarvamTTS(TTSProvider):
                     code = int(data.get("code") or 500) if str(data.get("code", "")).isdigit() \
                         else 500
                     raise from_http_status("Sarvam", code, data.get("message", ""))
+        finally:
+            with contextlib.suppress(Exception):
+                await ws.close()
 
     async def _rest(self, text: str, voice: Voice, key: str) -> bytes:
         body = {

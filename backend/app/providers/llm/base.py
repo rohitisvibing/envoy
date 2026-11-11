@@ -8,15 +8,21 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-Role = Literal["extraction", "conversation", "simulator"]
+Role = Literal["extraction", "conversation", "simulator", "live"]
 
 
 @dataclass
 class Message:
     role: Literal["system", "user", "assistant"]
     content: str
+    # Stable prefix: providers that support prompt caching may cache everything up to and
+    # including this message.
+    cache: bool = False
 
-    def as_dict(self) -> dict:
+    def as_dict(self, *, cache_control: bool = False) -> dict:
+        if self.cache and cache_control:
+            return {"role": self.role, "content": [
+                {"type": "text", "text": self.content, "cache_control": {"type": "ephemeral"}}]}
         return {"role": self.role, "content": self.content}
 
 

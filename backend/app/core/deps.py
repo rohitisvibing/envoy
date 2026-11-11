@@ -9,6 +9,8 @@ from app.providers.llm.demo import DemoLLM
 from app.providers.llm.openrouter import OpenRouterProvider
 from app.providers.stt.base import STTProvider
 from app.providers.stt.sarvam import SarvamSTT
+from app.providers.translate.base import TranslationProvider
+from app.providers.translate.sarvam import SarvamTranslator
 from app.providers.tts.base import TTSProvider
 from app.providers.tts.sarvam import SarvamTTS
 from app.repositories.base import Repository
@@ -25,6 +27,7 @@ class Container:
     stt: STTProvider
     tts: TTSProvider
     repo: Repository
+    translator: TranslationProvider | None = None
 
     @property
     def demo(self) -> bool:
@@ -46,8 +49,9 @@ def build_container(settings: Settings | None = None) -> Container:
         log.warning("Supabase not configured: using the in-memory repository (data is lost "
                     "on restart).")
         repo = MemoryRepository(seed_principal_id=s.default_principal_id)
-    return Container(settings=s, llm=DemoLLM() if use_demo else OpenRouterProvider(s),
-                     stt=SarvamSTT(s), tts=SarvamTTS(s), repo=repo)
+    llm = DemoLLM() if use_demo else OpenRouterProvider(s)
+    return Container(settings=s, llm=llm, stt=SarvamSTT(s), tts=SarvamTTS(s), repo=repo,
+                     translator=SarvamTranslator(s, fallback=llm))
 
 
 _container: Container | None = None

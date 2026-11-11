@@ -128,7 +128,10 @@ class SupabaseRepository(Repository):
         return [TranscriptEvent.model_validate(r) for r in res.data]
 
     async def save_approval(self, approval):
-        await (await self._t("approvals")).upsert(_j(approval)).execute()
+        row = _j(approval)
+        row.pop("request_en", None)
+        row.pop("proposed_en", None)
+        await (await self._t("approvals")).upsert(row).execute()
 
     async def list_approvals(self, conversation_id):
         res = await (await self._t("approvals")).select("*") \

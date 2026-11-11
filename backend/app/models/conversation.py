@@ -105,6 +105,9 @@ class Approval(Schema):
     alternative_text: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
     resolved_at: datetime | None = None
+    # English renderings for the principal; not stored in the approvals table.
+    request_en: str | None = None
+    proposed_en: str | None = None
 
 
 class ApprovalDecision(Schema):

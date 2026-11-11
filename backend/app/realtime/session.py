@@ -34,9 +34,15 @@ from app.providers.languages import to_code, to_name
 from app.providers.stt.base import STTStream
 from app.providers.tts.base import Voice
 from app.services import approval_manager, outcome_analyzer, simulator
-from app.services.conversation_manager import TurnInputs, merge_delta, plan_turn
+from app.services.conversation_manager import (
+    TurnInputs,
+    merge_delta,
+    plan_turn,
+    update_state,
+)
 from app.services.policy_guard import extract_amounts
 
+from .audio_buffer import AudioBuffer
 from .counterparty import BrowserMicChannel, CounterpartyChannel, SimulatedChannel
 
 log = logging.getLogger(__name__)
@@ -55,6 +61,7 @@ PAUSE_RE = re.compile(
     r"^\s*(pause|stop|hold on|wait)(\s+(please|now|a (sec|second|moment|minute)|"
     r"for a (sec|second|moment|minute)))?\s*[.!]*\s*$", re.IGNORECASE)
 MAX_INSTRUCTIONS = 8
+_SAYS_AI = re.compile(r"\b(ai|a\.i\.|artificial intelligence)\b|ಎಐ|एआई|ஏஐ|ఏఐ", re.IGNORECASE)
 
 
 class LiveSession:
@@ -102,6 +109,15 @@ class LiveSession:
         self._bg: set[asyncio.Task] = set()
         self.voice_enabled = conv.voice_enabled and c.voice_available
         self.pace_text = c.settings.text_pacing  # in text-only mode, pause roughly as long as reading takes
+        # Negotiation notes are updated off the critical path, while a line is being spoken.
+        self._state_task: asyncio.Task | None = None
+        # Practice mode: the other side's next line (and the agent's answer to it) are worked
+        # out while the current line plays. Anything that changes the conversation drops them.
+        self.speculate = c.settings.speculate and conv.mode == ConversationMode.simulated
+        self._spec_sim: asyncio.Task | None = None
+        self._spec_agent: asyncio.Task | None = None
+        self._prerender: AudioBuffer | None = None
+        self._heard_at: float | None = None  # when the latest line finished playing
 
     # ---- plumbing ------------------------------------------------------------------------
     @property
@@ -264,16 +280,27 @@ class LiveSession:
                 else s.sarvam_tts_agent_speaker)
         return Voice(speaker=name, language_code=to_code(language))
 
-    async def speak(self, speaker: Speaker, text: str, language: str | None) -> TranscriptEvent:
-        event = TranscriptEvent(conversation_id=self.conv.id, speaker=speaker, text=text,
-                                language=language, source="voice" if self.voice_enabled
-                                else "text")
+    async def speak(self, speaker: Speaker, text: str, language: str | None, *,
+                    event: TranscriptEvent | None = None, audio: AudioBuffer | None = None,
+                    en: str | None = None,
+                    on_added: Callable[[], None] | None = None) -> TranscriptEvent:
+        """Say a line: add it to the transcript, then play it (or pre-rendered `audio`)."""
+        if event is None:
+            event = TranscriptEvent(conversation_id=self.conv.id, speaker=speaker, text=text,
+                                    language=language, source="voice" if self.voice_enabled
+                                    else "text")
+        if en and en.strip() and en.strip() != event.text.strip():
+            event.meta["en"] = en.strip()
         await self.add_event(event)
+        if event.kind == EventKind.speech and self._needs_english(event):
+            self._bg_task(self._translate(event))
+        if on_added:
+            on_added()
         await self.set_state(S.speaking if speaker in (Speaker.agent, Speaker.user)
                              else S.listening)
         self.speaking_turn = event.id
         try:
-            await self._play(event, speaker)
+            await self._play(event, speaker, audio)
         except asyncio.CancelledError:
             event.meta["interrupted"] = True
             await self.emit({"type": "audio.stop", "turn_id": event.id})
@@ -285,7 +312,8 @@ class LiveSession:
             self.playback.pop(event.id, None)
         return event
 
-    async def _play(self, event: TranscriptEvent, speaker: Speaker) -> None:
+    async def _play(self, event: TranscriptEvent, speaker: Speaker,
+                    audio: AudioBuffer | None = None) -> None:
         reading_time = min(6.0, max(1.2, len(event.text) * 0.045)) if self.pace_text else 0
         if not (self.voice_enabled and self.sinks):
             await asyncio.sleep(reading_time if self.sinks else 0)
@@ -295,10 +323,25 @@ class LiveSession:
         done = asyncio.Event()
         self.playback[event.id] = done
         total, seq, first_at = 0, 0, None
-        try:
+        started = time.monotonic()
+
+        async def chunks():
+            if audio is not None:
+                try:
+                    async for pcm in audio:
+                        yield pcm
+                    return
+                except Exception as e:  # noqa: BLE001 - render it live instead
+                    log.warning("pre-rendered audio unusable (%s); rendering now", e)
             async for pcm in tts.synthesize(event.text, voice):
+                yield pcm
+
+        try:
+            async for pcm in chunks():
                 if first_at is None:
                     first_at = time.monotonic()
+                    self._log_gap(speaker, (first_at - started) * 1000,
+                                  prerendered=audio is not None)
                 total += len(pcm)
                 await self.emit({"type": "audio", "turn_id": event.id, "speaker": speaker.value,
                                  "seq": seq, "sample_rate": tts.sample_rate,
@@ -316,7 +359,15 @@ class LiveSession:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(done.wait(), timeout=max(0.5, duration - elapsed) + 4)
 
+    def _log_gap(self, speaker: Speaker, tts_ms: float, *, prerendered: bool) -> None:
+        """Latency: time to first audio, and the silence since the previous line ended."""
+        gap = (time.monotonic() - self._heard_at) * 1000 if self._heard_at else None
+        log.info("latency %s: tts_first_audio=%.0fms%s%s", speaker.value, tts_ms,
+                 " (pre-rendered)" if prerendered else "",
+                 f" gap_since_previous_line={gap:.0f}ms" if gap is not None else "")
+
     def playback_done(self, turn_id: str) -> None:
+        self._heard_at = time.monotonic()
         ev = self.playback.get(turn_id)
         if ev:
             ev.set()
@@ -332,6 +383,8 @@ class LiveSession:
         self.schedule(self._open(), kind="agent")
 
     async def _open(self) -> None:
+        if self.voice_enabled:
+            self.c.tts.warm()
         await self.channel.prepare(self)
         self.mission.status = MissionStatus.active
         self._bg_task(self._save_mission())
@@ -339,13 +392,19 @@ class LiveSession:
                                               if self.conv.mode == ConversationMode.simulated
                                               else ". Listening through your microphone"))
         brief = self.mission.brief
-        if brief:
+        # Openings prepared before AI announcements became optional still say it: re-open.
+        stale = brief is not None and not self.spec.communication.announce_ai \
+            and _SAYS_AI.search(brief.opening_statement) is not None
+        if brief and not stale:
             plan = TurnPlan(response_text=brief.opening_statement,
                             response_language=brief.opening_language)
             self.turn_no += 1
             await self.speak_agent_plan(plan)
         else:
-            await self.run_agent_turn(directive="Open the conversation.", is_opening=True)
+            await self.run_agent_turn(
+                directive="Open the conversation: introduce yourself (by your name, if you have "
+                          "one) as calling on the principal's behalf, then state the purpose.",
+                is_opening=True)
 
     async def _save_mission(self) -> None:
         with contextlib.suppress(Exception):
@@ -355,6 +414,7 @@ class LiveSession:
     async def finish(self, reason: str, *, failed: bool = False) -> None:
         if self.state in (S.completed, S.failed):
             return
+        self._drop_speculation()
         await self._cancel_task()
         await self._close_stt()
         self.paused = False
@@ -394,13 +454,143 @@ class LiveSession:
                           is_opening=is_opening, commitment_approved=self.commitment_approved,
                           allow_hold=allow_hold)
 
+    # ---- off the critical path: notes, speculation, translation ---------------------------
+    def _start_state_update(self, agent_line: str | None = None,
+                            language: str | None = None) -> None:
+        """Update the negotiation notes for the latest exchange while the line is spoken."""
+        events = list(self.events)
+        if agent_line:
+            events.append(TranscriptEvent(conversation_id=self.conv.id, speaker=Speaker.agent,
+                                          text=agent_line, language=language))
+        turn, prev = self.turn_no, self._state_task
+
+        async def run() -> None:
+            if prev and not prev.done():
+                await asyncio.wait({prev})
+            t0 = time.monotonic()
+            try:
+                delta = await update_state(self.llm, self.spec, self.negotiation, events)
+            except Exception as e:  # noqa: BLE001 - notes are best effort
+                log.warning("state update failed: %s", e)
+                return
+            log.info("latency state_update=%.0fms", (time.monotonic() - t0) * 1000)
+            self.negotiation = merge_delta(self.negotiation, delta, turn)
+            await self.emit_negotiation()
+
+        self._state_task = asyncio.create_task(run())
+
+    async def _state_ready(self, timeout: float = 12.0) -> None:
+        """The next line is planned on up-to-date notes: wait for a pending update."""
+        t = self._state_task
+        if t and not t.done():
+            await asyncio.wait({t}, timeout=timeout)
+
+    def _drop_speculation(self, *, agent_only: bool = False) -> None:
+        for name in ("_spec_agent",) if agent_only else ("_spec_agent", "_spec_sim"):
+            t = getattr(self, name)
+            if t and not t.done():
+                t.cancel()
+            setattr(self, name, None)
+        if not agent_only and self._prerender is not None:
+            self._prerender.cancel()
+            self._prerender = None
+
+    async def _take(self, name: str) -> Any | None:
+        """Claim a speculative result, if one is still valid."""
+        t = getattr(self, name)
+        setattr(self, name, None)
+        if t is None:
+            return None
+        await asyncio.wait({t})
+        if t.cancelled():
+            return None
+        if t.exception() is not None:
+            log.warning("speculative %s failed: %s", name, t.exception())
+            return None
+        return t.result()
+
+    def _speculate_sim(self) -> None:
+        """The agent's line is in the transcript: start the other side's reply right away."""
+        channel = self.channel
+        if not (self.speculate and isinstance(channel, SimulatedChannel) and channel.persona):
+            return
+        self._drop_speculation()
+        self._spec_sim = asyncio.create_task(
+            self._precompute_sim(channel.persona, list(self.events)))
+
+    async def _precompute_sim(self, persona, events: list[TranscriptEvent]):
+        t0 = time.monotonic()
+        turn = await simulator.next_turn(self.llm, persona, events)
+        log.info("latency simulate=%.0fms (while the agent speaks)",
+                 (time.monotonic() - t0) * 1000)
+        event = TranscriptEvent(conversation_id=self.conv.id, speaker=Speaker.counterparty,
+                                text=turn.text, language=turn.language,
+                                source="voice" if self.voice_enabled else "text")
+        audio: AudioBuffer | None = None
+        if self.voice_enabled and self.sinks:
+            # Rendering starts now and playback can begin before it finishes.
+            voice = self._voice_for(Speaker.counterparty, turn.language)
+            audio = AudioBuffer(self.c.tts.synthesize(turn.text, voice))
+            self._prerender = audio
+        if not turn.end_conversation:
+            # And the agent's answer to it, so it can speak as soon as they finish.
+            if self._spec_agent and not self._spec_agent.done():
+                self._spec_agent.cancel()
+            self._spec_agent = asyncio.create_task(self._precompute_agent(events + [event]))
+        return turn, event, audio
+
+    async def _precompute_agent(self, events: list[TranscriptEvent]):
+        await self._state_ready()
+        inputs = self._inputs(None)
+        inputs.events = events
+        nudges = list(self.queued_nudges)
+        t0 = time.monotonic()
+        decision = await plan_turn(self.llm, inputs)
+        log.info("latency say=%.0fms (while they speak)", (time.monotonic() - t0) * 1000)
+        return decision, nudges, [e.id for e in events]
+
+    @staticmethod
+    def _needs_english(event: TranscriptEvent) -> bool:
+        if event.meta.get("en"):
+            return False
+        lang = (event.language or "").strip().lower()
+        if lang:
+            return not lang.startswith("en")
+        return any(ord(ch) > 0x2FF and ch.isalpha() for ch in event.text)
+
+    async def _translate(self, event: TranscriptEvent) -> None:
+        """Give the principal an English rendering of a line (never blocks the call)."""
+        translator = self.c.translator
+        if translator is None:
+            return
+        try:
+            en = await translator.to_english(event.text, to_code(event.language, "auto")
+                                             if event.language else "auto")
+        except Exception as e:  # noqa: BLE001 - a missing translation must not stop the call
+            log.warning("translation failed: %s", e)
+            return
+        if not en or en.strip() == event.text.strip():
+            return
+        event.meta["en"] = en.strip()
+        await self.emit({"type": "transcript.update", "id": event.id, "meta": event.meta})
+        self._bg_task(self._save_event_meta(event))
+
     async def run_agent_turn(self, directive: str | None = None, is_opening: bool = False,
                              allow_hold: bool = False) -> None:
         self.respond_after_speech = None
         self._turn_args = (directive, allow_hold)
-        nudges = list(self.queued_nudges)
-        await self.set_state(S.thinking)
-        decision = await plan_turn(self.llm, self._inputs(directive, is_opening, allow_hold))
+        plain = directive is None and not is_opening and not allow_hold
+        pre = await self._take("_spec_agent") if plain else None
+        if pre and pre[2] == [e.id for e in self.events] and pre[1] == list(self.queued_nudges):
+            decision, nudges = pre[0], pre[1]
+            await self.set_state(S.thinking)
+        else:
+            nudges = list(self.queued_nudges)
+            await self.set_state(S.thinking)
+            await self._state_ready()
+            t0 = time.monotonic()
+            decision = await plan_turn(self.llm, self._inputs(directive, is_opening, allow_hold))
+            log.info("latency say=%.0fms", (time.monotonic() - t0) * 1000)
         plan = decision.plan
         if plan.hold:
             self.negotiation = merge_delta(self.negotiation, plan.state_delta, self.turn_no)
@@ -421,9 +611,20 @@ class LiveSession:
             self.approvals[approval.id] = approval
             self.pending_plans[approval.id] = plan
             self.negotiation.approval_required = True
+            if approval.proposed_en is None and approval.proposed == plan.response_text:
+                approval.proposed_en = plan.response_text_en
+            if approval.request_en is None:
+                last_cp = next((e for e in reversed(self.events)
+                                if e.speaker == Speaker.counterparty), None)
+                if last_cp and last_cp.text == approval.request:
+                    approval.request_en = last_cp.meta.get("en")
             self._bg_task(self._save_approval(approval))
-            await self.speak(Speaker.agent, approval_manager.holding_line(plan),
-                             plan.response_language)
+            self._drop_speculation()
+            hold_line = approval_manager.holding_line(plan)
+            self._start_state_update(hold_line, plan.response_language)
+            await self.speak(Speaker.agent, hold_line, plan.response_language,
+                             en=None if plan.response_language == "English"
+                             else approval_manager.HOLDING_LINES["English"])
             await self.add_event(TranscriptEvent(
                 conversation_id=self.conv.id, speaker=Speaker.system, kind=EventKind.approval,
                 text=decision.approval.reason or "Your approval is needed.",
@@ -433,6 +634,8 @@ class LiveSession:
                              "approval": approval.model_dump(mode="json")})
             await self.emit_negotiation()
             return
+        if not is_opening:
+            self._start_state_update(plan.response_text, plan.response_language)
         await self.speak_agent_plan(plan, nudges)
 
     async def speak_agent_plan(self, plan: TurnPlan, nudges: list[str] | None = None) -> None:
@@ -442,7 +645,9 @@ class LiveSession:
         if plan.objective_met:
             self.negotiation.objective_met = True
         await self.emit_negotiation()
-        spoken = await self.speak(Speaker.agent, plan.response_text, plan.response_language)
+        spoken = await self.speak(
+            Speaker.agent, plan.response_text, plan.response_language, en=plan.response_text_en,
+            on_added=None if plan.end_conversation else self._speculate_sim)
         if nudges:
             spoken.meta["nudges"] = nudges
             await self.emit({"type": "transcript.update", "id": spoken.id, "meta": spoken.meta})
@@ -479,10 +684,19 @@ class LiveSession:
     async def run_simulator_turn(self) -> None:
         channel = self.channel
         assert isinstance(channel, SimulatedChannel)
+        pre = await self._take("_spec_sim")
         await channel.prepare(self)
         await self.set_state(S.listening)
-        turn = await simulator.next_turn(self.llm, channel.persona, self.events)  # type: ignore[arg-type]
-        event = await self.speak(Speaker.counterparty, turn.text, turn.language)
+        event, audio = None, None
+        if pre:
+            turn, event, audio = pre
+            self._prerender = None  # now it's the line being played, not a guess
+        else:
+            t0 = time.monotonic()
+            turn = await simulator.next_turn(self.llm, channel.persona, self.events)  # type: ignore[arg-type]
+            log.info("latency simulate=%.0fms", (time.monotonic() - t0) * 1000)
+        event = await self.speak(Speaker.counterparty, turn.text, turn.language, event=event,
+                                 audio=audio, en=turn.text_en)
         if turn.end_conversation:
             event.meta["end_conversation"] = True
         await self.handle_counterparty_turn(
@@ -505,10 +719,14 @@ class LiveSession:
         """Live mode: a final transcript (voice) or typed counterparty line arrived."""
         if self.state in (S.completed, S.failed) or not text.strip():
             return
-        await self.add_event(TranscriptEvent(
+        self._heard_at = time.monotonic()
+        self._drop_speculation()
+        event = await self.add_event(TranscriptEvent(
             conversation_id=self.conv.id, speaker=Speaker.counterparty, text=text.strip(),
             language=language, source=source,
             meta={"utterance_id": utterance_id} if utterance_id else {}))
+        if self._needs_english(event):
+            self._bg_task(self._translate(event))
         if self.task_kind == "agent" and self.task and not self.task.done() \
                 and self.state == S.speaking:
             self.respond_after_speech = "reply"  # answer once the current line finishes
@@ -526,6 +744,7 @@ class LiveSession:
         text = text.strip()
         if not text or self.state in (S.completed, S.failed):
             return
+        self._drop_speculation(agent_only=not urgent)
         event = await self.add_event(TranscriptEvent(
             conversation_id=self.conv.id, speaker=Speaker.user, kind=EventKind.instruction,
             text=text, meta={"status": "queued", "urgent": urgent}))
@@ -567,6 +786,7 @@ class LiveSession:
         if self.paused or self.state in (S.completed, S.failed, S.ready, S.connecting):
             return
         self.paused = True
+        self._drop_speculation()
         if self.state != S.awaiting_approval:
             await self._cancel_task()
         await self.set_state(S.paused)
@@ -606,6 +826,7 @@ class LiveSession:
     async def interrupt(self, *, barge_in: bool = False) -> None:
         if self.state != S.speaking:
             return
+        self._drop_speculation()
         await self._cancel_task()
         await self.set_state(S.interrupted)
         await self.system("Agent interrupted" + (" by the other party" if barge_in else ""))
@@ -617,6 +838,7 @@ class LiveSession:
         if self.takeover_active or self.state in (S.completed, S.failed):
             return
         self.takeover_active = True
+        self._drop_speculation()
         await self._cancel_task()
         await self.set_state(S.paused)
         await self.system("You took over. Messages you type are spoken to the other party.")
@@ -648,6 +870,7 @@ class LiveSession:
         if not approval or approval.status != ApprovalStatus.pending:
             return
         plan = self.pending_plans.pop(approval_id, None)
+        self._drop_speculation()
         res = approval_manager.resolve(approval, decision, plan)
         self._bg_task(self._save_approval(approval))
         label = {"approved": "Approved", "rejected": "Rejected",
@@ -737,5 +960,6 @@ class LiveSession:
             self.stt_task = None
 
     async def shutdown(self) -> None:
+        self._drop_speculation()
         await self._cancel_task()
         await self._close_stt()

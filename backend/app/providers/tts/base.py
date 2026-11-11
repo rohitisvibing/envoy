@@ -22,3 +22,6 @@ class TTSProvider(ABC):
 
     def supports(self, language_code: str) -> bool:
         return True
+
+    def warm(self) -> None:
+        """Optionally prepare a connection so the next line starts sooner."""

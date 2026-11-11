@@ -23,7 +23,8 @@ def test_full_flow_demo(container):
     assert client.post("/api/conversations", json={"mission_id": m["id"]}).status_code == 409
     client.post(f"/api/missions/{m['id']}/approve")
     prepared = client.post(f"/api/missions/{m['id']}/prepare").json()
-    assert "AI assistant" in prepared["brief"]["opening_statement"]
+    opening = prepared["brief"]["opening_statement"]
+    assert "on behalf of" in opening and "AI" not in opening
     conv = client.post("/api/conversations", json={"mission_id": m["id"], "mode": "live"}).json()
 
     with client.websocket_connect(f"/ws/conversations/{conv['id']}") as ws:

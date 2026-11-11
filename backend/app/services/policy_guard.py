@@ -130,6 +130,16 @@ _AI_DISCLOSURE = re.compile(
     re.IGNORECASE,
 )
 
+# Claiming to be human, or denying being an AI, is never allowed (checked on the line and on
+# its English translation, so it holds in any language the model writes).
+_CLAIMS_HUMAN = re.compile(
+    r"\bi(?:'| a)?m\s+(?:a\s+)?(?:real\s+)?(?:human|person|human being)\b"
+    r"|\bi(?:'| a)?m\s+not\s+(?:a\s+|an\s+)?(?:ai|a\.i\.|bot|robot|machine|computer|recording|"
+    r"automated|artificial)\b"
+    r"|\bnot\s+(?:a\s+)?(?:bot|robot)\b",
+    re.IGNORECASE,
+)
+
 
 def _breaches(q: Quantity, value: float) -> bool:
     return value > q.value if q.direction == "max" else value < q.value
@@ -202,10 +212,16 @@ def check_turn(
             "Accepting terms or making a commitment requires the principal's approval.",
             ApprovalKind.final_commitment))
 
-    # 4. Transparency: the opening line must identify the agent as an AI.
-    if is_opening and not _AI_DISCLOSURE.search(text):
+    # 4. Honesty: never claim to be human or deny being an AI. Announcing it up front is
+    # the principal's choice (announce_ai).
+    if any(_CLAIMS_HUMAN.search(t) for t in (text, plan.response_text_en or "") if t):
+        violations.append(Violation(
+            "claims_human",
+            "Never claim to be human or deny being an AI. If asked, answer truthfully."))
+    if is_opening and spec.communication.announce_ai and not _AI_DISCLOSURE.search(text):
         violations.append(Violation("missing_ai_disclosure",
-                                    "Opening must state that you are an AI agent."))
+                                    "The principal asked you to say up front that you are an "
+                                    "AI assistant."))
 
     if not violations:
         return GuardResult(Action.allow, plan=plan)

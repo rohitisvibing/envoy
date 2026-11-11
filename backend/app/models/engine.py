@@ -29,13 +29,23 @@ class ApprovalNeed(Schema):
     request: str = Field(description="What the counterparty is asking for")
     proposed: str = Field(description="The exact reply/commitment the agent wants to make")
     reason: str
+    request_en: str | None = Field(default=None, description="English of request, if not English")
+    proposed_en: str | None = Field(default=None,
+                                    description="English of proposed, if not English")
 
 
-class TurnPlan(Schema):
-    state_delta: StateDelta = Field(default_factory=StateDelta)
+class TurnSay(Schema):
+    """The critical path of a turn: what to say now and the flags the safety check needs.
+
+    response_text comes first so the line is decided before anything else. How the
+    negotiation moved is tracked separately (StateDelta) while the line is being spoken.
+    """
+
     response_text: str = Field(default="", description="Exactly what the agent says next (1-3 sentences)")
     response_language: str = Field(default="English",
                                    description="Language of response_text, e.g. Kannada")
+    response_text_en: str | None = Field(
+        default=None, description="English translation of response_text; null if it is English")
     offers_made: list[Offer] = Field(default_factory=list,
                                      description="Any offer/counter-offer in response_text")
     accepts_offer: bool = Field(default=False,
@@ -55,6 +65,12 @@ class TurnPlan(Schema):
                     "right now; response_text empty. Allowed only if the DIRECTIVE permits it.")
 
 
+class TurnPlan(TurnSay):
+    """A full turn as the session handles it: the line plus how the negotiation moved."""
+
+    state_delta: StateDelta = Field(default_factory=StateDelta)
+
+
 class SimulatorPersona(Schema):
     name: str
     role: str
@@ -68,4 +84,6 @@ class SimulatorPersona(Schema):
 class SimulatorTurn(Schema):
     text: str
     language: str = "English"
+    text_en: str | None = Field(default=None,
+                                description="English translation of text; null if it is English")
     end_conversation: bool = False

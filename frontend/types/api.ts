@@ -42,7 +42,13 @@ export interface MissionSpec {
   minimum_requirements: string[];
   context: string[];
   counterparty: { type: string; name: string | null; preferred_language: string | null; notes: string | null };
-  communication: { languages: string[]; tone: string; personality: string | null };
+  communication: {
+    languages: string[];
+    tone: string;
+    personality: string | null;
+    agent_name?: string | null;
+    announce_ai?: boolean;
+  };
   strategy: string[];
   constraints: string[];
   approval_requirements: { kind: ApprovalKind; condition: string }[];
@@ -185,6 +191,8 @@ export interface Approval {
   alternative_text: string | null;
   created_at: string;
   resolved_at: string | null;
+  request_en?: string | null;
+  proposed_en?: string | null;
 }
 
 export interface ConversationDetail {

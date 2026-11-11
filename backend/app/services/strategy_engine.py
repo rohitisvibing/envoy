@@ -18,12 +18,14 @@ async def prepare(llm: LLMProvider, spec: MissionSpec, profile: PrincipalProfile
         + "\n\nPRINCIPAL PROFILE (disclosure-filtered):\n"
         + json.dumps(profile_context(profile), ensure_ascii=False)
         + f"\n\nShareable principal name: {profile.display_name()}"
+        + f"\nAGENT NAME: {spec.communication.agent_name or '(none)'}"
+        + f"\nANNOUNCE AI: {'yes' if spec.communication.announce_ai else 'no'}"
     )
     brief = await llm.complete_json(
         PreparationBrief, [Message("system", prompts.STRATEGY), Message("user", user)],
         task="prepare", role="conversation", temperature=0.3,
     )
-    if not _AI_DISCLOSURE.search(brief.opening_statement):
+    if spec.communication.announce_ai and not _AI_DISCLOSURE.search(brief.opening_statement):
         brief.opening_statement = (
             f"Hello, I'm an AI assistant calling on behalf of {profile.display_name()}. "
             + brief.opening_statement)

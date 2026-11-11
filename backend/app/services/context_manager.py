@@ -73,7 +73,7 @@ def principal_instructions(events: list[TranscriptEvent], since_index: int = 0) 
             if e.kind == EventKind.instruction and e.speaker == Speaker.user]
 
 
-def turn_context(
+def turn_context_parts(
     *,
     spec: MissionSpec,
     brief: PreparationBrief | None,
@@ -84,20 +84,24 @@ def turn_context(
     standing_instructions: list[str],
     approved_disclosures: dict[str, str] | None = None,
     extra_directive: str | None = None,
-) -> str:
-    """Compact JSON-ish user message for one agent turn."""
-    parts = [
+) -> tuple[str, str]:
+    """The user message for one agent turn, as (stable prefix, what changes each turn).
+
+    The prefix (mission, profile, strategy) is identical across turns, so providers can cache
+    it; the rest is small.
+    """
+    static = [
         "MISSION:\n" + json.dumps(mission_context(spec), ensure_ascii=False),
         "PRINCIPAL PROFILE (disclosure-filtered):\n"
         + json.dumps(profile_context(profile, approved_disclosures), ensure_ascii=False),
     ]
     if brief:
-        parts.append("PREPARED STRATEGY:\n" + json.dumps(
+        static.append("PREPARED STRATEGY:\n" + json.dumps(
             {"steps": brief.strategy_steps,
              "objections": [o.model_dump() for o in brief.anticipated_objections],
              "walk_away": brief.walk_away_conditions}, ensure_ascii=False))
-    parts.append("CURRENT NEGOTIATION STATE:\n"
-                 + negotiation.model_dump_json(exclude={"approval_required"}))
+    parts = ["CURRENT NEGOTIATION STATE:\n"
+             + negotiation.model_dump_json(exclude={"approval_required"})]
     if standing_instructions:
         parts.append("STANDING PRINCIPAL INSTRUCTIONS (keep following these, most recent last):\n- "
                      + "\n- ".join(standing_instructions))
@@ -107,5 +111,26 @@ def turn_context(
     parts.append("RECENT TRANSCRIPT:\n" + transcript_context(events))
     if extra_directive:
         parts.append("DIRECTIVE FOR THIS TURN:\n" + extra_directive)
-    parts.append("Produce the next TurnPlan.")
-    return "\n\n".join(parts)
+    parts.append("Produce your next line.")
+    return "\n\n".join(static), "\n\n".join(parts)
+
+
+def turn_context(**kw) -> str:
+    """The whole turn context as one string (kept for callers and tests)."""
+    static, dynamic = turn_context_parts(**kw)
+    return static + "\n\n" + dynamic
+
+
+def state_context(spec: MissionSpec, negotiation: NegotiationState,
+                  events: list[TranscriptEvent]) -> str:
+    """What the note-keeper needs: the quantities in play, current notes, latest exchange."""
+    quantities = {"targets": [q.model_dump(mode="json") for q in spec.targets],
+                  "hard_limits": [q.model_dump(mode="json") for q in spec.hard_limits]}
+    return "\n\n".join([
+        "MISSION:\n" + json.dumps({"objective": spec.objective, **quantities},
+                                  ensure_ascii=False),
+        "CURRENT NEGOTIATION STATE:\n"
+        + negotiation.model_dump_json(exclude={"approval_required"}),
+        "RECENT TRANSCRIPT:\n" + transcript_context(events, limit=6),
+        "Return the StateDelta for the latest exchange.",
+    ])

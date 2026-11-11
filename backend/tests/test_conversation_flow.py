@@ -40,7 +40,7 @@ async def test_opening_then_text_and_voice_share_one_context(make_session):
     s = make_session(llm)
     await s.start()
     await settle(s)
-    assert s.events[-1].speaker == Speaker.agent and "AI assistant" in s.events[-1].text
+    assert s.events[-1].speaker == Speaker.agent and "on behalf of" in s.events[-1].text
     assert s.state == S.listening
 
     await s.counterparty_said("Rent is ₹35,000.", "English", "voice")   # via STT

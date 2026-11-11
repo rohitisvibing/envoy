@@ -72,10 +72,32 @@ def test_commitment_allowed_after_preapproval(rent_spec, profile):
     assert r.ok
 
 
-def test_opening_requires_ai_disclosure(rent_spec, profile):
+def test_opening_need_not_announce_ai_by_default(rent_spec, profile):
+    assert check_turn(plan("Hello, this is Maya calling on behalf of Ananya about the rent."),
+                      rent_spec, profile, is_opening=True).ok
+
+
+def test_opening_announces_ai_when_the_principal_asks(rent_spec, profile):
+    rent_spec.communication.announce_ai = True
     assert check_turn(plan("Hello, I'm calling about the rent."), rent_spec, profile,
                       is_opening=True).action == Action.regenerate
     assert check_turn(plan("Hello, I'm an AI assistant calling for Ananya."), rent_spec, profile,
                       is_opening=True).ok
     assert check_turn(plan("ನಮಸ್ಕಾರ, ನಾನು ಅನನ್ಯ ಅವರ ಪರವಾಗಿ ಕರೆ ಮಾಡುತ್ತಿರುವ ಎಐ ಸಹಾಯಕ."),
                       rent_spec, profile, is_opening=True).ok
+
+
+@pytest.mark.parametrize("text, en", [
+    ("No, I'm a real person.", None),
+    ("I am not a bot, I promise.", None),
+    ("ಇಲ್ಲ, ನಾನು ನಿಜವಾದ ಮನುಷ್ಯ.", "No, I'm a real person."),
+])
+def test_never_claims_to_be_human(rent_spec, profile, text, en):
+    r = check_turn(plan(text, response_text_en=en), rent_spec, profile)
+    assert r.action == Action.regenerate
+    assert any(v.code == "claims_human" for v in r.violations)
+
+
+def test_admitting_to_being_an_ai_is_fine(rent_spec, profile):
+    assert check_turn(plan("Yes, I'm an AI assistant calling on Ananya's behalf."),
+                      rent_spec, profile).ok

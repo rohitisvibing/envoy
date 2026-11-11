@@ -84,7 +84,7 @@ backend/app/
 - **Hard limits:** offers in the structured plan and amounts in the spoken text (₹32,000, 32k, "thirty two thousand", 1.5 lakh, Kannada and Devanagari digits) are checked against limits. Restating the other side's number is allowed.
 - **Disclosure:** *Never* fields are never put in any prompt. *Ask me* fields appear by name only until you approve, and approval lasts for one turn. The guard also scans output for restricted values.
 - **Commitments:** accepting a deal always needs your final approval.
-- **Transparency:** the opening line must identify the agent as an AI acting on your behalf.
+- **Honesty:** the agent introduces itself as calling on your behalf (by the name you give it, if any). It doesn't announce that it's an AI unless you switch that on, but it never claims to be human, and if asked directly it answers truthfully. The guard blocks any line (or its English translation) that claims to be a person.
 - **No invented facts:** missing profile values are presented as unknown, and the agent defers to you.
 
 Approvals distinguish information sharing, negotiation authority, financial commitments, and final commitment.
@@ -129,6 +129,17 @@ The engine keeps *new* nudges, which are acted on now, separate from *standing* 
 - Live-mode speech streams as partial transcripts.
 - Activity rows show when the agent is thinking or the other side is responding.
 
+### Speed
+
+- **The line first, the notes after.** Each agent turn is one small call (what to say, plus the flags the safety check needs) on a fast model with reasoning off and the stable part of the prompt cached. How the negotiation moved is worked out by a second call while the line is being spoken.
+- **Practice mode thinks ahead.** As soon as the agent's line is decided, the simulated counterparty's reply is generated and its audio rendered while the agent is still talking; the agent's answer to that reply is planned while the counterparty speaks. A nudge, pause, interrupt, takeover or approval discards anything prepared in advance.
+- **Warm voice connection.** A Sarvam TTS socket is opened ahead of each line, so speech starts in about 200 ms.
+- The backend logs `latency …` lines per turn (model time, time to first audio, silence since the previous line).
+
+### English alongside every line
+
+Agent and simulated lines carry an English translation from the same model call. Live counterparty speech is translated with Sarvam Translate (with an LLM fallback) in the background and arrives as `transcript.update {meta: {en}}`. The workspace shows the English under each line; the header toggle hides it.
+
 ### Voice pipeline
 
 - **TTS:** Bulbul over WebSocket with `linear16` output. PCM chunks are streamed to the browser and scheduled gaplessly in Web Audio. The agent and the simulated counterparty use different speakers. On stream failure it falls back to REST.
@@ -140,7 +151,7 @@ The engine keeps *new* nudges, which are acted on now, separate from *standing* 
 ## Tests
 
 ```bash
-cd backend && uv run pytest          # 90 tests
+cd backend && uv run pytest          # 110 tests
 cd frontend && pnpm lint && pnpm exec tsc --noEmit && pnpm build
 ```
 
@@ -164,6 +175,8 @@ See `.env.example`. Every secret stays server-side. The frontend only knows `NEX
 | --- | --- |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | LLM gateway and default model |
 | `LLM_MODEL_EXTRACTION/CONVERSATION/SIMULATOR` | Optional per-stage model overrides |
+| `LLM_MODEL_LIVE` | The agent's live lines and notes (default Claude Haiku 5.5) |
+| `SARVAM_TRANSLATE_MODEL`, `SPECULATE` | English renderings; thinking ahead in practice mode |
 | `SARVAM_API_KEY` | STT + TTS |
 | `SARVAM_TTS_MODEL`, `SARVAM_TTS_AGENT_SPEAKER`, `SARVAM_TTS_COUNTERPARTY_SPEAKER` | Voices (speaker names must match the model) |
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | Persistence (RLS enabled; backend uses service role) |

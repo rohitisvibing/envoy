@@ -15,7 +15,7 @@ from .test_conversation_flow import PERSONA, settle, turn
 
 def slow_speech(session, seconds=0.3):
     """Make each spoken line take real time, so nudges can arrive mid-line."""
-    async def _play(event, speaker):
+    async def _play(event, speaker, audio=None):
         await asyncio.sleep(seconds)
     session._play = _play  # type: ignore[method-assign]
 

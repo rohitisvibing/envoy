@@ -51,8 +51,8 @@ async def conversation_socket(ws: WebSocket, conversation_id: str) -> None:
             await ws.send_json(msg)
 
     session.attach(sink)
-    await sink(session.snapshot())
     try:
+        await sink(session.snapshot())  # a client that already left raises here
         while True:
             msg = await ws.receive()
             if msg.get("type") == "websocket.disconnect":

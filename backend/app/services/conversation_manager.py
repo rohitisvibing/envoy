@@ -1,22 +1,23 @@
-"""Turn planning: one structured LLM call per agent turn, then the deterministic guard.
+"""Turn planning: a small structured call decides the next line, then the deterministic guard.
 
-The LLM returns a TurnPlan (state delta + what to say + flags). The delta is merged into
-NegotiationState without a further LLM call. The guard either allows the turn, asks the
-model to regenerate once with feedback, or converts it into an approval request.
+The critical path is TurnSay (what to say plus the flags the guard needs), kept short so the
+line can be spoken quickly. How the negotiation moved (StateDelta) comes from a second call
+that runs while the line is being spoken (`update_state`). The guard either allows the turn,
+asks the model to regenerate once with feedback, or converts it into an approval request.
 """
 
 import logging
 from dataclasses import dataclass, field
 
 from app.models.conversation import NegotiationState
-from app.models.engine import ApprovalNeed, StateDelta, TurnPlan
+from app.models.engine import ApprovalNeed, StateDelta, TurnPlan, TurnSay
 from app.models.mission import ApprovalKind, MissionSpec, PreparationBrief
 from app.models.principal import Disclosure, PrincipalProfile
 from app.models.transcript import EventKind, Speaker, TranscriptEvent
 from app.providers.llm.base import LLMProvider, Message
 
 from . import prompts
-from .context_manager import turn_context
+from .context_manager import state_context, turn_context_parts
 from .policy_guard import Action, GuardResult, check_turn, counterparty_numbers
 
 log = logging.getLogger(__name__)
@@ -109,15 +110,17 @@ async def plan_turn(llm: LLMProvider, inputs: TurnInputs) -> TurnDecision:
     plan: TurnPlan | None = None
     guard: GuardResult | None = None
     for attempt in range(2):
-        user = turn_context(
+        static, dynamic = turn_context_parts(
             spec=inputs.spec, brief=inputs.brief, profile=inputs.profile,
             negotiation=inputs.negotiation, events=inputs.events,
             new_instructions=inputs.new_instructions,
             standing_instructions=inputs.standing_instructions,
             approved_disclosures=inputs.approved_disclosures, extra_directive=directive)
-        plan = await llm.complete_json(
-            TurnPlan, [Message("system", prompts.AGENT_TURN), Message("user", user)],
-            task="turn", role="conversation")
+        say = await llm.complete_json(
+            TurnSay, [Message("system", prompts.AGENT_TURN, cache=True),
+                      Message("user", static, cache=True), Message("user", dynamic)],
+            task="turn", role="live", max_tokens=1400)
+        plan = TurnPlan.model_validate(say.model_dump())
         if plan.hold or not plan.response_text.strip():
             if inputs.allow_hold:
                 plan.hold, plan.response_text = True, ""
@@ -142,13 +145,23 @@ async def plan_turn(llm: LLMProvider, inputs: TurnInputs) -> TurnDecision:
             + ". Rewrite it to comply.")
     assert plan is not None and guard is not None
     if guard.action == Action.regenerate and not plan.response_text.strip():
-        plan.response_text = "Sorry, could you say that again?"
+        plan.response_text, plan.response_text_en = "Sorry, could you say that again?", None
         guard = GuardResult(Action.allow, plan=plan)
     if guard.action == Action.regenerate:
         # Second draft still unsafe: never speak it. Fall back to a safe deferral.
         plan.response_text = ("I'll need to check that with the person I'm representing "
                               "before I can answer.")
+        plan.response_language, plan.response_text_en = "English", None
         plan.offers_made, plan.accepts_offer = [], False
         guard = GuardResult(Action.allow, plan=plan)
     approval, key = _approval_from(plan, guard, inputs.profile, last_cp)
     return TurnDecision(plan=plan, guard=guard, approval=approval, disclosure_key=key)
+
+
+async def update_state(llm: LLMProvider, spec: MissionSpec, negotiation: NegotiationState,
+                       events: list[TranscriptEvent]) -> StateDelta:
+    """Track how the negotiation moved in the latest exchange (off the critical path)."""
+    return await llm.complete_json(
+        StateDelta, [Message("system", prompts.STATE_UPDATE),
+                     Message("user", state_context(spec, negotiation, events))],
+        task="state", role="live", temperature=0.1, max_tokens=1000)

@@ -24,7 +24,8 @@ def holding_line(plan: TurnPlan) -> str:
 
 def create(conversation_id: str, need: ApprovalNeed, disclosure_key: str | None) -> Approval:
     return Approval(conversation_id=conversation_id, kind=need.kind, request=need.request,
-                    proposed=need.proposed, reason=need.reason, disclosure_key=disclosure_key)
+                    proposed=need.proposed, reason=need.reason, disclosure_key=disclosure_key,
+                    request_en=need.request_en, proposed_en=need.proposed_en)
 
 
 @dataclass

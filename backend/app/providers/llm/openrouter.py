@@ -17,7 +17,9 @@ log = logging.getLogger(__name__)
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 RETRY_STATUSES = {429, 500, 502, 503, 504}
-LIVE_TASKS = {"turn", "simulate", "persona"}
+# Live lines need speed, not deliberation: hidden reasoning tripled turn latency.
+NO_REASONING_ROLES = {"live", "simulator"}
+LIVE_TASKS = {"turn", "state", "simulate", "persona"}
 
 
 def _parse_json(raw: str) -> dict:
@@ -35,6 +37,7 @@ class OpenRouterProvider(LLMProvider):
         self.settings = settings
         self.max_retries = max_retries
         self._client: httpx.AsyncClient | None = None
+        self._reasoning_param_ok = True  # some models reject the reasoning switch
 
     def _http(self) -> httpx.AsyncClient:
         if not self.settings.openrouter_api_key:
@@ -58,6 +61,8 @@ class OpenRouterProvider(LLMProvider):
         }
         if response_format:
             body["response_format"] = response_format
+        if role in NO_REASONING_ROLES and self._reasoning_param_ok:
+            body["reasoning"] = {"enabled": False}
         client = self._http()
         for attempt in range(self.max_retries + 1):
             try:
@@ -76,6 +81,11 @@ class OpenRouterProvider(LLMProvider):
                 log.warning("OpenRouter %s (attempt %d); retrying in %.1fs", r.status_code,
                             attempt + 1, wait)
                 await asyncio.sleep(wait)
+                continue
+            if r.status_code == 400 and "reasoning" in body and "reasoning" in r.text.lower():
+                log.warning("Model rejected the reasoning switch; sending without it")
+                self._reasoning_param_ok = False
+                body.pop("reasoning")
                 continue
             if r.status_code >= 400:
                 ra = r.headers.get("retry-after")
@@ -97,7 +107,10 @@ class OpenRouterProvider(LLMProvider):
     async def complete_json(self, schema: type[T], messages: list[Message], *, task: str,
                             role: Role = "conversation", temperature=None, max_tokens=None) -> T:
         json_schema = schema.model_json_schema()
-        msgs = [m.as_dict() for m in messages]
+        # Anthropic models cache the stable prefix (system prompt, mission, profile) so live
+        # turns only pay for the new part of the prompt.
+        cache = self.settings.model_for(role).startswith("anthropic/")
+        msgs = [m.as_dict(cache_control=cache) for m in messages]
         msgs.append({
             "role": "system",
             "content": "Respond with a single JSON object matching this JSON Schema. "

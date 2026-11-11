@@ -43,11 +43,13 @@ export function ApprovalSheet({
             <p className="border-r-2 border-ember/70 pr-3.5 text-right text-lead text-ember">
               <span className="sr-only">They said: </span>
               {approval.request}
+              {approval.request_en && <span lang="en" className="mt-1 block text-body text-ink-2">{approval.request_en}</span>}
             </p>
           )}
           <p className="border-l-2 border-aurora/70 pl-3.5 text-lead text-ink">
             <span className="sr-only">The agent wants to say: </span>
             {approval.proposed}
+            {approval.proposed_en && <span lang="en" className="mt-1 block text-body text-ink-2">{approval.proposed_en}</span>}
           </p>
           <p className="text-meta text-ink-2">{approval.reason}</p>
         </div>

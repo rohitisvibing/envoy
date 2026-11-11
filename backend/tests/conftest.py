@@ -3,7 +3,7 @@ import pytest
 from app.core.config import Settings
 from app.core.deps import Container, set_container
 from app.models.conversation import Conversation, ConversationMode
-from app.models.mission import Mission, MissionSpec, MissionStatus, PreparationBrief, Quantity  # noqa: F811
+from app.models.mission import Mission, MissionSpec, MissionStatus, PreparationBrief, Quantity
 from app.models.principal import Disclosure, PrincipalProfile, ProfileField
 from app.providers.llm.demo import DemoLLM
 from app.providers.stt.sarvam import SarvamSTT
@@ -20,7 +20,7 @@ RENT_REQUEST = (
 @pytest.fixture
 def settings() -> Settings:
     return Settings(_env_file=None, openrouter_api_key="", sarvam_api_key="", supabase_url="",
-                    demo_mode=True, text_pacing=False)
+                    demo_mode=True, text_pacing=False, speculate=False)
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def rent_spec() -> MissionSpec:
 
 @pytest.fixture
 def brief() -> PreparationBrief:
-    return PreparationBrief(opening_statement="Hello, I'm an AI assistant calling on behalf of "
+    return PreparationBrief(opening_statement="Hello, I'm an assistant calling on behalf of "
                                               "Ananya about the rent.")
 
 

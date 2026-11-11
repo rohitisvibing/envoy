@@ -46,7 +46,8 @@ class DemoLLM(LLMProvider):
 
     async def complete_json(self, schema: type[T], messages: list[Message], *, task: str,
                             role="conversation", temperature=None, max_tokens=None) -> T:
-        user = messages[-1].content if messages else ""
+        # A turn prompt arrives as a cached prefix plus the part that changes; read both.
+        user = "\n\n".join(m.content for m in messages if m.role == "user")
         handler = getattr(self, f"_{task}", None)
         if handler is None:
             raise NotImplementedError(task)
@@ -82,6 +83,9 @@ class DemoLLM(LLMProvider):
         tone = next((t for t in ["polite but firm", "polite and firm", "friendly", "assertive"]
                      if t in low), "polite and clear")
         title = "Rent negotiator" if "rent" in low else "Negotiator"
+        named = re.search(r"(?i:call yourself|your name is|introduce yourself as)\s+([A-Z][a-z]+)",
+                          req)
+        agent_name = named.group(1) if named else None
         spec = MissionSpec(
             title=title,
             objective=req.split(".")[0].strip()[:160],
@@ -90,7 +94,7 @@ class DemoLLM(LLMProvider):
             targets=targets, hard_limits=limits,
             context=[s.strip() for s in req.split(".")[1:3] if s.strip()],
             counterparty={"type": counterparty},
-            communication={"languages": languages, "tone": tone},
+            communication={"languages": languages, "tone": tone, "agent_name": agent_name},
             strategy=["Open by explaining the purpose and the principal's situation",
                       "Anchor near the target and justify it",
                       "Concede in small steps only when the other side moves",
@@ -125,8 +129,13 @@ class DemoLLM(LLMProvider):
                            user)
         purpose = (f"to discuss the {target.group(1).lower()}" if target
                    else "about the matter we need to settle")
+        agent = re.search(r"AGENT NAME: (.+)", user)
+        agent_name = agent.group(1).strip() if agent and "(none)" not in agent.group(1) else None
+        announce = re.search(r"ANNOUNCE AI: yes", user) is not None
+        me = (f"this is {agent_name}" if agent_name else "I'm an assistant") + (
+            ", an AI assistant," if announce else "")
         return PreparationBrief(
-            opening_statement=(f"Hello, I'm an AI assistant calling on behalf of {who}. "
+            opening_statement=(f"Hello, {me} calling on behalf of {who}. "
                                f"I'm calling {purpose}. Is this a good time to talk?"),
             strategy_steps=["Confirm they have a few minutes", "Explain the request and reasons",
                             "Anchor at the target", "Trade small concessions for commitment"],
@@ -177,7 +186,7 @@ class DemoLLM(LLMProvider):
                             objective_met=True, end_conversation=True)
         if newest and "holding is allowed" in directive.lower() and re.search(
                 r"\b(firm|assertive|slow|don'?t|do not|never|avoid|stop|polite|calm|patient)", newest,
-                re.I):
+                re.IGNORECASE):
             return TurnPlan(state_delta=StateDelta(next_action=f"Keep in mind: {newest}"),
                             hold=True)
         if newest and "new instruction" in directive.lower():
@@ -215,6 +224,10 @@ class DemoLLM(LLMProvider):
                             offers_made=[Offer(by="agent", amount=step, quantity_name=qname,
                                                terms=text)])
         return TurnPlan(state_delta=delta, response_text="Could you tell me more about that?")
+
+    def _state(self, user: str, m) -> StateDelta:
+        """Notes for the latest exchange: the same heuristics as a turn, minus the line."""
+        return self._turn(user, m).state_delta
 
     # ---- simulator -----------------------------------------------------------------------
     def _persona(self, user: str, _m) -> SimulatorPersona:
