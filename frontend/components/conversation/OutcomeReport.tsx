@@ -1,52 +1,59 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Minus, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Check, ChevronDown, X } from "lucide-react";
 import { api, ApiError } from "@/services/api";
 import type { Offer } from "@/types/api";
 import { money } from "@/lib/format";
 import { AgentOrb } from "@/components/orb/AgentOrb";
+import { AmbientGlow } from "@/components/shell/AmbientGlow";
 import { Button } from "@/components/ui/button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
+import { DealLine, dealFrom } from "@/components/viz/DealLine";
 import { cn } from "@/lib/utils";
 
-function List({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+function List({ title, items, tone }: { title: string; items: string[]; tone?: string }) {
+  if (!items.length) return null;
   return (
-    <section className="border-t border-line/70 py-5" aria-label={title}>
-      <h2 className="text-meta font-medium text-ink-2">{title}</h2>
-      {items.length ? (
-        <ul className="mt-2 space-y-1.5">
-          {items.map((t, i) => (
-            <li key={i} className="text-body text-ink">
-              {t}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-meta text-ink-3">{empty}</p>
-      )}
+    <section aria-label={title}>
+      <h2 className="text-meta text-ink-3">{title}</h2>
+      <ul className="mt-1.5 space-y-1">
+        {items.map((t, i) => (
+          <li key={i} className={cn("text-body", tone ?? "text-ink")}>
+            {t}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
 
-function OfferTimeline({ made, received }: { made: Offer[]; received: Offer[] }) {
+function Offers({ made, received }: { made: Offer[]; received: Offer[] }) {
   const all = [...made.map((o) => ({ ...o, side: "agent" })), ...received.map((o) => ({ ...o, side: "them" }))].sort((a, b) => a.turn - b.turn);
-  if (!all.length) return <p className="mt-2 text-meta text-ink-3">No offers were exchanged.</p>;
+  if (!all.length) return null;
   return (
-    <ol className="mt-3 space-y-2">
-      {all.map((o, i) => (
-        <li key={i} className={cn("flex items-baseline gap-3", o.side === "agent" ? "" : "")}>
-          <span className={cn("w-16 shrink-0 text-meta", o.side === "agent" ? "text-violet" : "text-ink-2")}>{o.side === "agent" ? "Agent" : "Them"}</span>
-          <span className="w-24 shrink-0 text-body tabular text-ink">{o.amount != null ? money(o.amount) : "—"}</span>
-          <span className="min-w-0 truncate text-meta text-ink-2">{o.terms}</span>
-        </li>
-      ))}
-    </ol>
+    <section aria-label="Offers">
+      <h2 className="text-meta text-ink-3">Offers</h2>
+      <ol className="mt-1.5 space-y-1">
+        {all.map((o, i) => (
+          <li key={i} className="flex items-baseline gap-3">
+            <span className={cn("w-20 shrink-0 text-body tabular", o.side === "agent" ? "text-aurora" : "text-ember")}>
+              <span className="sr-only">{o.side === "agent" ? "Agent" : "Them"}: </span>
+              {o.amount != null ? money(o.amount) : "—"}
+            </span>
+            <span className="min-w-0 truncate text-meta text-ink-2">{o.terms}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
 export function OutcomeReportView({ id }: { id: string }) {
+  const [details, setDetails] = useState(false);
   const report = useQuery({
     queryKey: ["report", id],
     queryFn: () => api.report(id),
@@ -59,116 +66,109 @@ export function OutcomeReportView({ id }: { id: string }) {
   const r = report.data;
   if (!r)
     return (
-      <div className="flex flex-col items-center pt-10" aria-live="polite">
-        <div className="size-40">
-          <AgentOrb state="thinking" label="Writing the report" />
+      <div className="grid place-items-center pt-[10vh]" aria-live="polite">
+        <AmbientGlow state="thinking" />
+        <div className="size-56">
+          <AgentOrb state="thinking" label="Writing the outcome" />
         </div>
-        <p className="mt-2 text-body text-ink-2">Writing the outcome report…</p>
       </div>
     );
 
   const mission = detail.data?.mission;
+  const agreed = r.comparisons.find((c) => c.achieved != null)?.achieved ?? null;
+  const deal = mission ? dealFrom(mission.spec, r, agreed) : null;
+  const met = r.objective_achieved;
+  // Lead with the first sentence; the full account waits in Details.
+  const [lead, ...restParts] = r.final_outcome.split(/(?<=[.!?])\s+/);
+  const rest = restParts.join(" ");
+
   return (
-    <div>
-      <p className="text-meta text-ink-3">{mission?.spec.title ?? "Outcome"}</p>
-      <div className="mt-2 flex items-start gap-4">
-        <div className="size-16 shrink-0">
-          <AgentOrb state={r.objective_achieved ? "completed" : "paused"} label={r.objective_achieved ? "Objective achieved" : "Objective not achieved"} />
-        </div>
-        <div className="min-w-0">
-          <h1 className={cn("text-display font-semibold tracking-[-0.025em]", r.objective_achieved ? "text-success" : "text-ink")}>
-            {r.objective_achieved ? "Objective achieved" : "Objective not achieved"}
-          </h1>
-          <p className="mt-1 text-body text-ink-2">{r.achievement_rationale}</p>
+    <div className="pt-4 sm:pt-10">
+      <AmbientGlow state={met ? "completed" : "paused"} />
+      <p className="text-meta text-ink-3">{mission?.spec.title ?? ""}</p>
+      <div className="mt-1 flex items-center gap-3">
+        <h1 className={cn("font-serif text-[4rem] leading-none sm:text-[5rem]", met ? "text-success" : "text-ink")}>{met ? "Met" : "Not met"}</h1>
+        <div className="size-16 shrink-0 sm:size-20">
+          <AgentOrb state={met ? "completed" : "paused"} label={met ? "Objective met" : "Objective not met"} />
         </div>
       </div>
+      <p className="mt-4 max-w-[48ch] text-title text-ink">{lead}</p>
 
-      <section className="mt-8" aria-label="Outcome">
-        <h2 className="text-meta font-medium text-ink-2">What happened</h2>
-        <p className="mt-1.5 max-w-[65ch] text-lead text-ink">{r.final_outcome}</p>
-        <p className="mt-3 text-meta text-ink-3">Original objective: {r.objective}</p>
-      </section>
-
-      {r.comparisons.length > 0 && (
-        <section className="mt-8 overflow-x-auto" aria-label="Target versus achieved">
-          <table className="w-full min-w-[22rem] text-left">
-            <caption className="mb-2 text-left text-meta font-medium text-ink-2">Target versus achieved</caption>
-            <thead>
-              <tr className="border-b border-line text-[12px] text-ink-3">
-                <th className="py-2 pr-3 font-normal" scope="col"></th>
-                <th className="py-2 pr-3 font-normal" scope="col">Target</th>
-                <th className="py-2 pr-3 font-normal" scope="col">Limit</th>
-                <th className="py-2 pr-3 font-normal" scope="col">Agreed</th>
-                <th className="py-2 font-normal" scope="col"><span className="sr-only">Met</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {r.comparisons.map((c) => (
-                <tr key={c.name} className="border-b border-line/60">
-                  <th scope="row" className="py-3 pr-3 text-body font-normal text-ink">{c.label}</th>
-                  <td className="py-3 pr-3 text-body tabular text-ink-2">{money(c.target, c.unit)}</td>
-                  <td className="py-3 pr-3 text-body tabular text-ink-2">{money(c.limit, c.unit)}</td>
-                  <td className="py-3 pr-3 text-body tabular text-ink">{money(c.achieved, c.unit)}</td>
-                  <td className="py-3">
-                    {c.met === true ? <Check className="size-4 text-success" aria-label="Met" /> : c.met === false ? <X className="size-4 text-error" aria-label="Missed" /> : <Minus className="size-4 text-ink-3" aria-label="Not agreed" />}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      {deal && <DealLine deal={deal} play className="mt-12 max-w-lg" />}
 
       {r.criteria.length > 0 && (
-        <section className="mt-8" aria-label="Success criteria">
-          <h2 className="text-meta font-medium text-ink-2">Success criteria</h2>
-          <ul className="mt-2 space-y-3">
-            {r.criteria.map((c, i) => (
-              <li key={i} className="flex gap-3">
-                {c.met ? <Check className="mt-1 size-4 shrink-0 text-success" aria-label="Met" /> : <X className="mt-1 size-4 shrink-0 text-error" aria-label="Not met" />}
-                <span>
-                  <span className="block text-body text-ink">{c.criterion}</span>
-                  <span className="block text-meta text-ink-2">{c.evidence}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <ul className="mt-12 space-y-1" aria-label="Success criteria">
+          {r.criteria.map((c, i) => (
+            <li key={i}>
+              <details className="group">
+                <summary className="flex min-h-9 cursor-pointer list-none items-start gap-3 py-1 text-body text-ink [&::-webkit-details-marker]:hidden">
+                  {c.met ? (
+                    <Check className="mt-1 size-4 shrink-0 text-success" aria-label="Met" />
+                  ) : (
+                    <X className="mt-1 size-4 shrink-0 text-error" aria-label="Not met" />
+                  )}
+                  {c.criterion}
+                </summary>
+                <p className="pb-2 pl-7 text-meta text-ink-2">{c.evidence}</p>
+              </details>
+            </li>
+          ))}
+        </ul>
       )}
 
-      <section className="mt-8 border-t border-line/70 py-5" aria-label="Offers">
-        <h2 className="text-meta font-medium text-ink-2">Offers made and received</h2>
-        <OfferTimeline made={r.offers_made} received={r.offers_received} />
-      </section>
-      <List title="Agreements" items={r.agreements} empty="Nothing was agreed." />
-      <List title="Commitments made" items={r.commitments} empty="No commitments were made on your behalf." />
-      <List title="Unresolved" items={r.unresolved_issues} empty="Nothing left open." />
+      <button
+        type="button"
+        aria-expanded={details}
+        onClick={() => setDetails((v) => !v)}
+        className="mt-8 flex min-h-10 items-center gap-1.5 text-meta text-ink-2 hover:text-ink"
+      >
+        <ChevronDown className={cn("size-4 transition-transform", details && "rotate-180")} />
+        Details
+      </button>
+      <AnimatePresence initial={false}>
+        {details && (
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+            <div className="space-y-7 pb-2 pt-4">
+              {rest && <p className="max-w-[65ch] text-body text-ink">{rest}</p>}
+              <p className="max-w-[65ch] text-body text-ink-2">{r.achievement_rationale}</p>
+              <Offers made={r.offers_made} received={r.offers_received} />
+              <List title="Agreed" items={r.agreements} tone="text-success" />
+              <List title="Committed for you" items={r.commitments} />
+              <List title="Still open" items={r.unresolved_issues} />
+              {r.excerpts.length > 0 && (
+                <section aria-label="Key moments">
+                  <h2 className="text-meta text-ink-3">Key moments</h2>
+                  <ul className="mt-1.5 space-y-2.5">
+                    {r.excerpts.map((x, i) => {
+                      const them = !/agent/i.test(x.speaker);
+                      return (
+                        <li key={i} className={cn("text-body", them ? "border-r-2 border-ember/60 pr-3 text-right text-ember" : "border-l-2 border-aurora/60 pl-3 text-ink")}>
+                          <span className="sr-only">{x.speaker}: </span>
+                          {x.text}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              )}
+              <List title="Next" items={r.next_steps} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {r.excerpts.length > 0 && (
-        <section className="border-t border-line/70 py-5" aria-label="Key moments">
-          <h2 className="text-meta font-medium text-ink-2">Key moments</h2>
-          <ul className="mt-3 space-y-3">
-            {r.excerpts.map((x, i) => (
-              <li key={i} className="border-l-2 border-line pl-3">
-                <span className="block text-[12px] text-ink-3">{x.speaker}</span>
-                <span className="block text-body text-ink">{x.text}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <List title="Recommended next steps" items={r.next_steps} empty="No follow-up needed." />
-
-      <div className="mt-6 flex flex-wrap gap-3">
-        <Button size="lg" nativeButton={false} render={<Link href="/missions/new" />}>
+      <div className="mt-10 flex flex-wrap items-center gap-2">
+        <Button size="lg" className="h-12 rounded-full px-7" nativeButton={false} render={<Link href="/" />}>
           New mission
         </Button>
         {mission && (
-          <Button size="lg" variant="secondary" nativeButton={false} render={<Link href={`/missions/${mission.id}/prepare`} />}>
-            Run it again
+          <Button size="lg" variant="ghost" className="h-12 rounded-full px-3" nativeButton={false} render={<Link href={`/missions/${mission.id}/prepare`} />}>
+            Run again
           </Button>
         )}
+        <Button size="lg" variant="ghost" className="h-12 rounded-full px-3" nativeButton={false} render={<Link href={`/conversations/${id}`} />}>
+          Transcript
+        </Button>
       </div>
     </div>
   );

@@ -6,16 +6,16 @@ import type { ConversationState, MissionStatus } from "@/types/api";
 const STATE_TO_ORB: Record<ConversationState, { state: OrbState; paused?: boolean; color?: string }> = {
   idle: { state: "breathing", paused: true },
   ready: { state: "breathing" },
-  preparing: { state: "connecting", color: "#8b7cff" },
-  connecting: { state: "connecting", color: "#8b7cff" },
-  listening: { state: "listening", color: "#b0c4ff" },
-  thinking: { state: "working", color: "#8b7cff" },
-  speaking: { state: "composing", color: "#8b7cff" },
-  interrupted: { state: "listening", color: "#b0c4ff" },
+  preparing: { state: "connecting", color: "#9db0ff" },
+  connecting: { state: "connecting", color: "#9db0ff" },
+  listening: { state: "listening", color: "#f3a88a" },
+  thinking: { state: "working", color: "#9db0ff" },
+  speaking: { state: "composing", color: "#9db0ff" },
+  interrupted: { state: "listening", color: "#f3a88a" },
   paused: { state: "breathing", paused: true },
-  awaiting_approval: { state: "breathing", color: "#e9ad55" },
-  completed: { state: "solving", paused: true, color: "#32c98a" },
-  failed: { state: "breathing", paused: true, color: "#f06b70" },
+  awaiting_approval: { state: "breathing", color: "#f2c25a" },
+  completed: { state: "solving", paused: true, color: "#7ed7ae" },
+  failed: { state: "breathing", paused: true, color: "#f07c86" },
 };
 
 /** Small animated glyph for lists and transcript rows (thinking-orbs, MIT). */

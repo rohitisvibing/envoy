@@ -5,7 +5,7 @@ import { MissionReview } from "@/components/mission-builder/MissionReview";
 export default function ReviewPage({ params }: PageProps<"/missions/[id]/review">) {
   return (
     <AppShell>
-      <Suspense fallback={<p className="text-ink-3">Loading mission…</p>}>
+      <Suspense fallback={null}>
         {params.then(({ id }) => (
           <MissionReview id={id} />
         ))}

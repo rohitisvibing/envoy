@@ -3,51 +3,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion } from "motion/react";
-import { Bot, Mic, RotateCcw } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Bot, ChevronDown, Mic, Pencil, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { api } from "@/services/api";
 import type { ConversationMode, Mission } from "@/types/api";
-import { money } from "@/lib/format";
 import { AgentOrb } from "@/components/orb/AgentOrb";
+import { AmbientGlow } from "@/components/shell/AmbientGlow";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+import { IconButton } from "@/components/ui/icon-button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
+import { DealLine, dealFrom } from "@/components/viz/DealLine";
 import { cn } from "@/lib/utils";
 
-const STEPS = [
-  "Reading your profile and sharing rules",
-  "Loading the mission and hard limits",
-  "Planning the conversation",
-  "Writing the opening line",
-  "Anticipating objections",
-  "Marking the moments that need you",
-];
-
-function Brief({ mission }: { mission: Mission }) {
+function Plan({ mission }: { mission: Mission }) {
   const b = mission.brief!;
   return (
-    <div className="space-y-6">
-      <section aria-label="Opening line">
-        <h2 className="text-meta font-medium text-ink-2">First thing the agent will say</h2>
-        <blockquote className="mt-2 border-l-2 border-violet pl-4 text-lead text-ink">
-          {b.opening_statement}
-          <span className="mt-1 block text-meta text-ink-3">{b.opening_language}</span>
-        </blockquote>
-      </section>
-      {mission.spec.hard_limits.length > 0 && (
-        <section aria-label="Limits">
-          <h2 className="text-meta font-medium text-ink-2">Won&apos;t go past</h2>
-          <p className="mt-1.5 flex flex-wrap gap-x-4 text-body">
-            {mission.spec.hard_limits.map((q) => (
-              <span key={q.name}>
-                {q.label} <span className="tabular">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
-              </span>
-            ))}
-          </p>
-        </section>
-      )}
+    <div className="space-y-8 pt-4 text-left">
       <section aria-label="Plan">
-        <h2 className="text-meta font-medium text-ink-2">Plan</h2>
+        <h2 className="text-meta text-ink-3">Plan</h2>
         <ol className="mt-2 space-y-1.5">
           {b.strategy_steps.map((s, i) => (
             <li key={i} className="flex gap-3 text-body">
@@ -58,21 +31,21 @@ function Brief({ mission }: { mission: Mission }) {
         </ol>
       </section>
       {b.anticipated_objections.length > 0 && (
-        <section aria-label="Likely objections">
-          <h2 className="text-meta font-medium text-ink-2">If they say…</h2>
+        <section aria-label="If they push back">
+          <h2 className="text-meta text-ink-3">If they push back</h2>
           <dl className="mt-2 space-y-3">
             {b.anticipated_objections.map((o, i) => (
               <div key={i}>
-                <dt className="text-body text-ink">&ldquo;{o.objection}&rdquo;</dt>
-                <dd className="mt-0.5 text-meta text-ink-2">{o.response}</dd>
+                <dt className="text-body text-ember">&ldquo;{o.objection}&rdquo;</dt>
+                <dd className="mt-0.5 text-body text-ink-2">{o.response}</dd>
               </div>
             ))}
           </dl>
         </section>
       )}
       {b.approval_triggers.length > 0 && (
-        <section aria-label="Will ask you">
-          <h2 className="text-meta font-medium text-ink-2">Will stop and ask you when</h2>
+        <section aria-label="Stops to ask you">
+          <h2 className="text-meta text-ink-3">Stops to ask you</h2>
           <ul className="mt-2 space-y-1.5">
             {b.approval_triggers.map((t, i) => (
               <li key={i} className="flex gap-2.5 text-body">
@@ -87,29 +60,10 @@ function Brief({ mission }: { mission: Mission }) {
   );
 }
 
-function ModeOption({ mode, current, onSelect, title, body, icon: Icon }: {
-  mode: ConversationMode; current: ConversationMode; onSelect: (m: ConversationMode) => void; title: string; body: string; icon: typeof Bot;
-}) {
-  const on = current === mode;
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={on}
-      onClick={() => onSelect(mode)}
-      className={cn(
-        "flex min-h-20 items-start gap-3 rounded-xl border border-line p-3.5 text-left transition-colors",
-        on ? "border-violet/60 bg-violet-soft/50" : "hover:bg-surface",
-      )}
-    >
-      <Icon className={cn("mt-0.5 size-4 shrink-0", on ? "text-violet" : "text-ink-2")} />
-      <span>
-        <span className="block text-body font-medium text-ink">{title}</span>
-        <span className="mt-0.5 block text-meta text-ink-2">{body}</span>
-      </span>
-    </button>
-  );
-}
+const MODES: { mode: ConversationMode; label: string; hint: string; icon: typeof Bot }[] = [
+  { mode: "simulated", label: "Practice", hint: "An AI plays the other side", icon: Bot },
+  { mode: "live", label: "Live", hint: "The other person speaks into this device", icon: Mic },
+];
 
 export function AgentPreparation({ id }: { id: string }) {
   const router = useRouter();
@@ -118,6 +72,8 @@ export function AgentPreparation({ id }: { id: string }) {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const [mode, setMode] = useState<ConversationMode>("simulated");
   const [voice, setVoice] = useState(true);
+  const [plan, setPlan] = useState(false);
+  const speechOk = health.data?.speech.configured ?? false;
   const started = useRef(false);
 
   const prepare = useMutation({
@@ -125,8 +81,9 @@ export function AgentPreparation({ id }: { id: string }) {
     onSuccess: (m) => qc.setQueryData(["mission", id], m),
   });
   const open = useMutation({
-    mutationFn: () => api.createConversation(id, mode, voice),
-    onSuccess: (c) => router.push(`/conversations/${c.id}`),
+    mutationFn: () => api.createConversation(id, mode, voice && speechOk),
+    // Straight into the call: the workspace starts it as soon as it connects.
+    onSuccess: (c) => router.push(`/conversations/${c.id}?autostart=1`),
   });
 
   const m = mission.data;
@@ -137,106 +94,107 @@ export function AgentPreparation({ id }: { id: string }) {
     }
   }, [m, prepare]);
 
-  if (mission.error) return <ErrorNote error={mission.error} />;
-  if (!m) return <p className="text-ink-3">Loading…</p>;
-  if (m.status === "draft")
-    return (
-      <div>
-        <p className="text-body text-ink-2">Approve the mission before preparing the agent.</p>
-        <Button className="mt-4" onClick={() => router.push(`/missions/${id}/review`)}>
-          Review mission
-        </Button>
-      </div>
-    );
+  const preparing = !m?.brief;
+  useEffect(() => {
+    // Only trust a fresh read: a cached copy may predate the approval.
+    if (m?.status === "draft" && mission.isFetchedAfterMount) router.replace(`/missions/${id}/review`);
+  }, [m?.status, mission.isFetchedAfterMount, router, id]);
 
-  const preparing = !m.brief;
-  const speechOk = health.data?.speech.configured ?? false;
+  if (mission.error) return <ErrorNote error={mission.error} />;
+  if (!m) return <AmbientGlow state="preparing" />;
+  if (m.status === "draft") return null;
+
+  const deal = dealFrom(m.spec);
 
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,22rem)_1fr] lg:gap-12">
-      <div className="lg:sticky lg:top-20 lg:self-start">
-        <div className="mx-auto aspect-square w-full max-w-[18rem] lg:max-w-none">
-          <AgentOrb state={preparing ? "preparing" : "ready"} label={preparing ? "Preparing the agent" : "Agent ready"} />
+    <div className="flex flex-col items-center text-center">
+      <AmbientGlow state={preparing ? "preparing" : "ready"} />
+      <div className={cn("aspect-square transition-[width] duration-700", preparing ? "mt-[8vh] w-[min(78vw,22rem)]" : "w-[min(56vw,15rem)]")}>
+        <AgentOrb state={preparing ? "preparing" : "ready"} label={preparing ? "Preparing the agent" : "Agent ready"} />
+      </div>
+
+      {preparing ? (
+        <div className="mt-4 w-full max-w-md text-left">
+          <ErrorNote error={prepare.error} />
+          {prepare.error && (
+            <Button className="mt-3" variant="secondary" onClick={() => prepare.mutate()}>
+              <RotateCcw className="size-4" /> Try again
+            </Button>
+          )}
         </div>
-        <h1 className="mt-2 text-center text-title font-semibold tracking-[-0.02em] lg:text-left">{m.spec.title}</h1>
-        <p className="mt-1 text-center text-meta text-ink-2 lg:text-left">{preparing ? "Preparing" : "Ready when you are"}</p>
-      </div>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.2, 0.7, 0.2, 1] }}
+          className="w-full"
+        >
+          <p className="text-meta text-ink-3">{m.spec.title}</p>
+          <blockquote lang={m.brief!.opening_language === "English" ? "en" : undefined} className="mx-auto mt-3 max-w-[30ch] font-serif text-[1.75rem] leading-[1.2] text-ink sm:text-[2rem]">
+            &ldquo;{m.brief!.opening_statement}&rdquo;
+          </blockquote>
 
-      <div className="min-w-0">
-        {preparing ? (
-          <div aria-live="polite">
-            <ol className="space-y-3">
-              {STEPS.map((s, i) => (
-                <motion.li
-                  key={s}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: i * 0.12 }}
-                  className="flex items-center gap-3 text-body text-ink-2"
+          {deal && <DealLine deal={deal} className="mx-auto mt-10 max-w-md text-left" />}
+
+          <div className="mt-10 flex items-center justify-center gap-2">
+            <div role="radiogroup" aria-label="Who's on the other end" className="flex rounded-full bg-surface/80 p-1 ring-1 ring-line">
+              {MODES.map(({ mode: v, label, hint, icon: Icon }) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === v}
+                  title={hint}
+                  onClick={() => setMode(v)}
+                  className={cn(
+                    "flex min-h-10 items-center gap-2 rounded-full px-4 text-meta text-ink-2 transition-colors hover:text-ink",
+                    mode === v && "bg-elevated text-ink",
+                  )}
                 >
-                  <span className="size-1.5 rounded-full bg-violet/70" aria-hidden />
-                  {s}
-                </motion.li>
+                  <Icon className="size-4" /> {label}
+                </button>
               ))}
-            </ol>
-            <ErrorNote error={prepare.error} className="mt-6" />
-            {prepare.error && (
-              <Button className="mt-3" variant="secondary" onClick={() => prepare.mutate()}>
-                <RotateCcw className="size-4" /> Try again
-              </Button>
-            )}
-          </div>
-        ) : (
-          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-            <Brief mission={m} />
-
-            <section className="mt-8 border-t border-line/70 pt-6" aria-label="Who's on the other end">
-              <h2 className="text-lead font-medium">Who&apos;s on the other end?</h2>
-              <div role="radiogroup" className="mt-3 grid gap-2 sm:grid-cols-2">
-                <ModeOption
-                  mode="simulated"
-                  current={mode}
-                  onSelect={setMode}
-                  icon={Bot}
-                  title="Practice with a simulated counterparty"
-                  body={`An AI plays the ${m.spec.counterparty.type}. Good for rehearsing before the real thing.`}
-                />
-                <ModeOption
-                  mode="live"
-                  current={mode}
-                  onSelect={setMode}
-                  icon={Mic}
-                  title="Live voice through this device"
-                  body="The other person speaks into your microphone. The agent listens and replies aloud."
-                />
-              </div>
-              <label className="mt-4 flex min-h-11 items-center justify-between gap-4 rounded-xl border border-line px-3.5">
-                <span>
-                  <span className="block text-body">Speak out loud</span>
-                  <span className="block text-meta text-ink-2">
-                    {speechOk ? "Voices by Sarvam Bulbul. Turn off to run in text only." : "Add SARVAM_API_KEY to enable voice. Text only for now."}
-                  </span>
-                </span>
-                <Switch checked={voice && speechOk} disabled={!speechOk} onCheckedChange={setVoice} aria-label="Speak out loud" />
-              </label>
-              {mode === "live" && !speechOk && (
-                <p className="mt-2 text-meta text-warning">Without a Sarvam key, type what the other person says instead of speaking.</p>
-              )}
-            </section>
-
-            <ErrorNote error={open.error} className="mt-4" />
-            <div className="mt-6 flex flex-wrap items-center gap-3">
-              <Button size="lg" onClick={() => open.mutate()} disabled={open.isPending}>
-                {open.isPending ? "Opening…" : "Open conversation"}
-              </Button>
-              <Button variant="ghost" onClick={() => router.push(`/missions/${id}/review`)} disabled={m.status === "active"}>
-                Edit mission
-              </Button>
             </div>
-            <p className="mt-3 text-meta text-ink-3">Nothing is said until you press Start in the workspace.</p>
-          </motion.div>
-        )}
-      </div>
+            <IconButton
+              label={!speechOk ? "Voice needs a Sarvam key" : voice ? "Voice on" : "Text only"}
+              icon={voice && speechOk ? Volume2 : VolumeX}
+              active={voice && speechOk}
+              disabled={!speechOk}
+              onClick={() => setVoice((v) => !v)}
+            />
+          </div>
+
+          <ErrorNote error={open.error} className="mx-auto mt-6 max-w-md text-left" />
+          <Button
+            size="lg"
+            onClick={() => open.mutate()}
+            disabled={open.isPending}
+            className="mt-8 h-14 rounded-full px-12 text-lead shadow-[0_10px_50px_-10px_rgb(157_176_255/0.7)]"
+          >
+            Start
+          </Button>
+
+          <div className="mt-10 flex items-center justify-center gap-1">
+            <button
+              type="button"
+              aria-expanded={plan}
+              onClick={() => setPlan((v) => !v)}
+              className="flex min-h-10 items-center gap-1.5 rounded-full px-3 text-meta text-ink-2 hover:text-ink"
+            >
+              <ChevronDown className={cn("size-4 transition-transform", plan && "rotate-180")} />
+              Plan
+            </button>
+            {m.status !== "active" && <IconButton label="Edit mission" icon={Pencil} size="sm" onClick={() => router.push(`/missions/${id}/review`)} />}
+          </div>
+          <AnimatePresence initial={false}>
+            {plan && (
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="mx-auto max-w-xl overflow-hidden">
+                <Plan mission={m} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      )}
     </div>
   );
 }

@@ -3,127 +3,77 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CircleHelp, Plus, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronDown, Pencil, Plus, X } from "lucide-react";
 import { api } from "@/services/api";
 import type { ApprovalKind, Mission, MissionSpec, Quantity } from "@/types/api";
-import { APPROVAL_LABEL, money } from "@/lib/format";
+import { APPROVAL_LABEL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { IconButton } from "@/components/ui/icon-button";
 import { ErrorNote } from "@/components/shell/ErrorNote";
+import { DealLine, dealFrom } from "@/components/viz/DealLine";
 import { cn } from "@/lib/utils";
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="border-t border-line/70 py-6 first:border-t-0 first:pt-0" aria-label={title}>
-      <h2 className="text-lead font-medium text-ink">{title}</h2>
-      {hint && <p className="mt-1 text-meta text-ink-3">{hint}</p>}
-      <div className="mt-3">{children}</div>
-    </section>
-  );
-}
+/** Text that reads as text until you touch it. */
+const inline =
+  "w-full resize-none rounded-lg bg-transparent px-2 py-1 -mx-2 text-ink transition-colors field-sizing-content hover:bg-surface/70 focus:bg-surface focus:outline-none focus:ring-1 focus:ring-line placeholder:text-ink-3";
 
-function EditableList({ items, onChange, placeholder, label }: { items: string[]; onChange: (v: string[]) => void; placeholder: string; label: string }) {
+function Lines({ items, onChange, add, label }: { items: string[]; onChange: (v: string[]) => void; add: string; label: string }) {
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-0.5">
       {items.map((item, i) => (
-        <li key={i} className="flex items-start gap-2">
-          <Textarea
+        <li key={i} className="group flex items-start gap-1">
+          <textarea
             aria-label={`${label} ${i + 1}`}
             value={item}
             rows={1}
             onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))}
-            className="min-h-10 flex-1 resize-none bg-surface py-2 text-body"
+            className={cn(inline, "text-body")}
           />
-          <Button variant="ghost" size="icon" aria-label={`Remove ${label.toLowerCase()} ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
-            <X className="size-4" />
-          </Button>
+          <IconButton
+            label={`Remove ${label.toLowerCase()} ${i + 1}`}
+            icon={X}
+            size="sm"
+            className="opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+            onClick={() => onChange(items.filter((_, j) => j !== i))}
+          />
         </li>
       ))}
       <li>
-        <Button variant="ghost" size="sm" className="text-ink-2" onClick={() => onChange([...items, ""])}>
-          <Plus className="size-4" /> {placeholder}
-        </Button>
+        <button type="button" className="flex min-h-9 items-center gap-1.5 text-meta text-ink-3 hover:text-ink" onClick={() => onChange([...items, ""])}>
+          <Plus className="size-3.5" /> {add}
+        </button>
       </li>
     </ul>
   );
 }
 
-function QuantityEditor({ items, onChange, kind }: { items: Quantity[]; onChange: (q: Quantity[]) => void; kind: "target" | "limit" }) {
+function Numbers({ items, onChange, kind }: { items: Quantity[]; onChange: (q: Quantity[]) => void; kind: "aim" | "limit" }) {
+  const set = (i: number, q: Partial<Quantity>) => onChange(items.map((x, j) => (j === i ? { ...x, ...q } : x)));
   return (
-    <ul className="space-y-2">
+    <>
       {items.map((q, i) => (
-        <li key={i} className="grid grid-cols-[1fr_8.5rem_auto] items-center gap-2 sm:grid-cols-[1fr_10rem_9rem_auto]">
-          <Input
-            aria-label="Name"
-            value={q.label}
-            onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-            className="h-10 bg-surface"
-          />
-          <Input
-            aria-label={`${q.label} value`}
+        <li key={`${kind}-${i}`} className="grid grid-cols-[3.25rem_minmax(0,1fr)_7rem_auto] items-center gap-2">
+          <span className={cn("text-meta", kind === "aim" ? "text-aurora" : "text-ink")}>{kind}</span>
+          <input aria-label={`${kind} name`} value={q.label} onChange={(e) => set(i, { label: e.target.value })} className={cn(inline, "text-body")} />
+          <input
+            aria-label={`${q.label} ${kind}`}
             inputMode="numeric"
             value={Number.isFinite(q.value) ? String(q.value) : ""}
-            onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, value: Number(e.target.value.replace(/[^\d.]/g, "")) } : x)))}
-            className="h-10 bg-surface tabular"
+            onChange={(e) => set(i, { value: Number(e.target.value.replace(/[^\d.]/g, "")) })}
+            className={cn(inline, "text-body tabular")}
           />
-          <select
-            aria-label="Direction"
-            value={q.direction}
-            onChange={(e) => onChange(items.map((x, j) => (j === i ? { ...x, direction: e.target.value as "max" | "min" } : x)))}
-            className="col-span-2 row-start-2 h-10 rounded-lg border border-line bg-surface px-2 text-meta text-ink sm:col-span-1 sm:row-start-auto"
+          <button
+            type="button"
+            onClick={() => set(i, { direction: q.direction === "max" ? "min" : "max" })}
+            className="min-h-9 rounded-full px-2.5 text-meta text-ink-2 ring-1 ring-line hover:text-ink"
+            aria-label={`Direction: ${q.direction === "max" ? "at most" : "at least"}. Switch.`}
           >
-            <option value="max">{kind === "limit" ? "Never above" : "At most"}</option>
-            <option value="min">{kind === "limit" ? "Never below" : "At least"}</option>
-          </select>
-          <Button variant="ghost" size="icon" aria-label={`Remove ${q.label}`} onClick={() => onChange(items.filter((_, j) => j !== i))}>
-            <X className="size-4" />
-          </Button>
+            {q.direction === "max" ? "≤" : "≥"}
+          </button>
         </li>
       ))}
-      <li>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-ink-2"
-          onClick={() =>
-            onChange([
-              ...items,
-              { name: `${kind}_${items.length + 1}`, label: kind === "limit" ? "New limit" : "New target", value: 0, unit: "INR", direction: "max" },
-            ])
-          }
-        >
-          <Plus className="size-4" /> Add {kind}
-        </Button>
-      </li>
-    </ul>
-  );
-}
-
-function Flags({ mission }: { mission: Mission }) {
-  const ex = mission.extraction;
-  if (!ex) return null;
-  const rows = [
-    ...ex.conflicts.map((t) => ({ t, tone: "error" as const })),
-    ...ex.ambiguities.map((t) => ({ t, tone: "warning" as const })),
-    ...ex.missing_information.map((t) => ({ t, tone: "warning" as const })),
-  ];
-  if (!rows.length) return null;
-  return (
-    <ul className="mb-6 space-y-2" aria-label="Things to check">
-      {rows.map((r, i) => (
-        <li
-          key={i}
-          className={cn(
-            "flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-body",
-            r.tone === "error" ? "border-error/35 bg-error/8" : "border-warning/30 bg-warning/8",
-          )}
-        >
-          <AlertTriangle className={cn("mt-0.5 size-4 shrink-0", r.tone === "error" ? "text-error" : "text-warning")} />
-          {r.t}
-        </li>
-      ))}
-    </ul>
+    </>
   );
 }
 
@@ -133,33 +83,34 @@ function Clarify({ mission, onRefined }: { mission: Mission; onRefined: (m: Miss
   const refine = useMutation({ mutationFn: () => api.refine(mission.id, answers), onSuccess: onRefined });
   if (!qs.length) return null;
   return (
-    <section className="mb-8 rounded-2xl border border-violet/30 bg-violet-soft/40 p-4" aria-label="Questions from the agent">
-      <h2 className="flex items-center gap-2 text-body font-medium">
-        <CircleHelp className="size-4 text-violet" /> A few things the agent needs to know
-      </h2>
-      <ul className="mt-3 space-y-3">
-        {qs.map((q) => (
-          <li key={q}>
-            <label className="text-body text-ink">{q}</label>
-            <Input
-              className="mt-1.5 h-10 bg-bg"
-              value={answers[q] ?? ""}
-              onChange={(e) => setAnswers({ ...answers, [q]: e.target.value })}
-              placeholder="Leave blank to skip"
-            />
-          </li>
-        ))}
-      </ul>
-      <ErrorNote error={refine.error} className="mt-3" />
-      <Button
-        className="mt-4"
-        variant="secondary"
-        disabled={refine.isPending || !Object.values(answers).some((a) => a.trim())}
-        onClick={() => refine.mutate()}
-      >
-        {refine.isPending ? "Updating…" : "Update mission"}
+    <section className="mt-10 space-y-4" aria-label="Questions">
+      {qs.map((q, i) => (
+        <div key={q}>
+          <label htmlFor={`q-${i}`} className="block text-body text-ink">
+            {q}
+          </label>
+          <input
+            id={`q-${i}`}
+            className="mt-1.5 h-11 w-full rounded-xl bg-surface/80 px-3.5 text-body ring-1 ring-line placeholder:text-ink-3 focus:outline-none focus:ring-aurora/50"
+            value={answers[q] ?? ""}
+            onChange={(e) => setAnswers({ ...answers, [q]: e.target.value })}
+          />
+        </div>
+      ))}
+      <ErrorNote error={refine.error} />
+      <Button variant="secondary" disabled={refine.isPending || !Object.values(answers).some((a) => a.trim())} onClick={() => refine.mutate()}>
+        {refine.isPending ? "Updating…" : "Update"}
       </Button>
     </section>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-baseline gap-3 py-1.5">
+      <dt className="text-meta text-ink-3">{label}</dt>
+      <dd className="min-w-0">{children}</dd>
+    </div>
   );
 }
 
@@ -169,6 +120,8 @@ export function MissionReview({ id }: { id: string }) {
   const { data: mission, error } = useQuery({ queryKey: ["mission", id], queryFn: () => api.mission(id) });
   const [spec, setSpec] = useState<MissionSpec | null>(null);
   const [synced, setSynced] = useState<Mission | undefined>(undefined);
+  const [editNumbers, setEditNumbers] = useState(false);
+  const [more, setMore] = useState(false);
   if (mission && mission !== synced) {
     setSynced(mission);
     setSpec(structuredClone(mission.spec));
@@ -180,156 +133,237 @@ export function MissionReview({ id }: { id: string }) {
       if (JSON.stringify(spec) !== JSON.stringify(mission.spec)) await api.updateSpec(id, spec);
       return api.approve(id);
     },
-    onSuccess: () => {
+    onSuccess: (m) => {
+      if (m) qc.setQueryData(["mission", id], m);
       qc.invalidateQueries({ queryKey: ["missions"] });
       router.push(`/missions/${id}/prepare`);
     },
   });
 
   if (error) return <ErrorNote error={error} />;
-  if (!mission || !spec) return <p className="text-ink-3">Loading mission…</p>;
+  if (!mission || !spec) return null;
   const set = <K extends keyof MissionSpec>(k: K, v: MissionSpec[K]) => setSpec({ ...spec, [k]: v });
   const locked = !["draft", "approved", "prepared"].includes(mission.status);
+  const deal = dealFrom(spec);
+  const ex = mission.extraction;
+  // Conflicts always show. Gaps only when no question already asks about them, and briefly.
+  const flags = ex
+    ? [
+        ...ex.conflicts.map((t) => ({ t, bad: true })),
+        ...(ex.clarifying_questions.length ? [] : [...ex.missing_information, ...ex.ambiguities].slice(0, 3).map((t) => ({ t, bad: false }))),
+      ]
+    : [];
 
   return (
-    <div>
-      <p className="text-meta text-ink-3">{mission.agent_type}</p>
-      <Input
-        aria-label="Mission title"
-        value={spec.title}
-        onChange={(e) => set("title", e.target.value)}
-        className="mt-1 h-auto border-transparent bg-transparent px-0 py-1 text-display font-semibold tracking-[-0.025em] focus-visible:border-line md:text-display"
-      />
-      <p className="mt-1 text-body text-ink-2">Check what the agent understood. Edit anything that&apos;s off before you approve.</p>
-
-      <div className="mt-6">
-        <Flags mission={mission} />
-        <Clarify
-          mission={mission}
-          onRefined={(m) => {
-            qc.setQueryData(["mission", id], m);
-          }}
-        />
-      </div>
-
+    <div className="pt-4 sm:pt-10">
       <fieldset disabled={locked} className="min-w-0">
-        <Section title="Objective">
-          <Textarea value={spec.objective} onChange={(e) => set("objective", e.target.value)} className="min-h-16 bg-surface text-body" />
-        </Section>
+        <label htmlFor="title" className="sr-only">
+          Title
+        </label>
+        <textarea
+          id="title"
+          rows={1}
+          value={spec.title}
+          onChange={(e) => set("title", e.target.value)}
+          className={cn(inline, "font-serif text-[2.5rem] leading-[1.05] sm:text-[3rem]")}
+        />
+        <label htmlFor="objective" className="sr-only">
+          Objective
+        </label>
+        <textarea id="objective" rows={1} value={spec.objective} onChange={(e) => set("objective", e.target.value)} className={cn(inline, "mt-2 text-lead text-ink-2")} />
 
-        <Section title="Desired outcome" hint="What the agent aims for. It can settle for less within your limits, then asks you before agreeing.">
-          <Textarea value={spec.desired_outcome} onChange={(e) => set("desired_outcome", e.target.value)} className="min-h-12 bg-surface text-body" />
-          <div className="mt-4">
-            <QuantityEditor items={spec.targets} onChange={(v) => set("targets", v)} kind="target" />
+
+        <section className="mt-10" aria-label="Numbers">
+          <div className="flex items-start gap-3">
+            {deal ? <DealLine deal={deal} className="flex-1" /> : <p className="flex-1 text-meta text-ink-3">No numbers to negotiate.</p>}
+            <IconButton label="Edit numbers" icon={Pencil} size="sm" active={editNumbers} onClick={() => setEditNumbers((v) => !v)} />
           </div>
-        </Section>
-
-        <Section title="Hard limits" hint="The agent will never offer or agree past these without your approval in the moment.">
-          {spec.hard_limits.length > 0 && (
-            <p className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-body">
-              {spec.hard_limits.map((q) => (
-                <span key={q.name}>
-                  {q.label}: <span className="tabular text-ink">{q.direction === "max" ? "≤" : "≥"} {money(q.value, q.unit)}</span>
-                </span>
-              ))}
-            </p>
-          )}
-          <QuantityEditor items={spec.hard_limits} onChange={(v) => set("hard_limits", v)} kind="limit" />
-          <div className="mt-4">
-            <EditableList items={spec.constraints} onChange={(v) => set("constraints", v)} placeholder="Add a rule" label="Rule" />
-          </div>
-        </Section>
-
-        <Section title="Context">
-          <EditableList items={spec.context} onChange={(v) => set("context", v)} placeholder="Add context" label="Context" />
-        </Section>
-
-        <Section title="Who they're talking to">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Input aria-label="Counterparty role" value={spec.counterparty.type} onChange={(e) => set("counterparty", { ...spec.counterparty, type: e.target.value })} className="h-10 bg-surface" />
-            <Input aria-label="Counterparty name" placeholder="Name (optional)" value={spec.counterparty.name ?? ""} onChange={(e) => set("counterparty", { ...spec.counterparty, name: e.target.value || null })} className="h-10 bg-surface" />
-            <Input aria-label="Their language" placeholder="Their language, if known" value={spec.counterparty.preferred_language ?? ""} onChange={(e) => set("counterparty", { ...spec.counterparty, preferred_language: e.target.value || null })} className="h-10 bg-surface" />
-          </div>
-        </Section>
-
-        <Section title="Personality and language">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="text-meta text-ink-2" htmlFor="tone">Tone</label>
-              <Input id="tone" value={spec.communication.tone} onChange={(e) => set("communication", { ...spec.communication, tone: e.target.value })} className="mt-1.5 h-10 bg-surface" />
-            </div>
-            <div>
-              <label className="text-meta text-ink-2" htmlFor="langs">Languages, preferred first</label>
-              <Input
-                id="langs"
-                value={spec.communication.languages.join(", ")}
-                onChange={(e) => set("communication", { ...spec.communication, languages: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-                className="mt-1.5 h-10 bg-surface"
-              />
-            </div>
-          </div>
-        </Section>
-
-        <Section title="Strategy">
-          <EditableList items={spec.strategy} onChange={(v) => set("strategy", v)} placeholder="Add a step" label="Step" />
-        </Section>
-
-        <Section title="Ask me before" hint="The agent pauses and waits for your decision in these situations.">
-          <ul className="space-y-2">
-            {spec.approval_requirements.map((a, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <select
-                  aria-label="Approval type"
-                  value={a.kind}
-                  onChange={(e) =>
-                    set("approval_requirements", spec.approval_requirements.map((x, j) => (j === i ? { ...x, kind: e.target.value as ApprovalKind } : x)))
-                  }
-                  className="h-10 w-40 shrink-0 rounded-lg border border-line bg-surface px-2 text-meta sm:w-56"
-                >
-                  {(Object.keys(APPROVAL_LABEL) as ApprovalKind[]).map((k) => (
-                    <option key={k} value={k}>
-                      {APPROVAL_LABEL[k]}
-                    </option>
+          <AnimatePresence initial={false}>
+            {editNumbers && (
+              <motion.ul
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="mt-4 space-y-1 overflow-hidden"
+              >
+                <Numbers items={spec.targets} onChange={(v) => set("targets", v)} kind="aim" />
+                <Numbers items={spec.hard_limits} onChange={(v) => set("hard_limits", v)} kind="limit" />
+                <li className="flex gap-4 pt-1">
+                  {(["aim", "limit"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className="flex min-h-9 items-center gap-1.5 text-meta text-ink-3 hover:text-ink"
+                      onClick={() => {
+                        const list = k === "aim" ? spec.targets : spec.hard_limits;
+                        const q: Quantity = { name: `${k}_${list.length + 1}`, label: deal?.label ?? "Amount", value: 0, unit: deal?.unit ?? "INR", direction: "max" };
+                        set(k === "aim" ? "targets" : "hard_limits", [...list, q]);
+                      }}
+                    >
+                      <Plus className="size-3.5" /> {k}
+                    </button>
                   ))}
-                </select>
-                <Input
-                  aria-label="Condition"
-                  value={a.condition}
-                  onChange={(e) =>
-                    set("approval_requirements", spec.approval_requirements.map((x, j) => (j === i ? { ...x, condition: e.target.value } : x)))
-                  }
-                  className="h-10 flex-1 bg-surface"
-                />
+                </li>
+              </motion.ul>
+            )}
+          </AnimatePresence>
+        </section>
+
+        {flags.length > 0 && (
+          <ul className="mt-8 space-y-1.5" aria-label="Worth checking">
+            {flags.map((f, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-body text-ink-2">
+                <span className={cn("mt-2 size-1.5 shrink-0 rounded-full", f.bad ? "bg-error" : "bg-warning")} aria-hidden />
+                {f.t}
               </li>
             ))}
-            <li>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-ink-2"
-                onClick={() => set("approval_requirements", [...spec.approval_requirements, { kind: "financial", condition: "" }])}
-              >
-                <Plus className="size-4" /> Add a checkpoint
-              </Button>
-            </li>
           </ul>
-        </Section>
-
-        <Section title="Success means" hint="The outcome report judges the conversation against these, not against how friendly it was.">
-          <EditableList items={spec.success_criteria} onChange={(v) => set("success_criteria", v)} placeholder="Add a criterion" label="Criterion" />
-        </Section>
+        )}
       </fieldset>
 
-      <ErrorNote error={approve.error} className="mt-4" />
-      <div className="sticky bottom-20 z-10 mt-6 flex items-center justify-end gap-3 sm:bottom-6">
-        {locked ? (
-          <p className="text-meta text-ink-2">This mission has already run.</p>
-        ) : (
-          <Button size="lg" onClick={() => approve.mutate()} disabled={approve.isPending} className="shadow-lg shadow-black/40">
-            {approve.isPending ? "Approving…" : "Approve mission"}
+      <Clarify mission={mission} onRefined={(m) => qc.setQueryData(["mission", id], m)} />
+
+      <fieldset disabled={locked} className="min-w-0">
+        <dl className="mt-10">
+          <Fact label="With">
+            <input
+              aria-label="Who they're talking to"
+              value={spec.counterparty.type}
+              onChange={(e) => set("counterparty", { ...spec.counterparty, type: e.target.value })}
+              className={cn(inline, "text-body")}
+            />
+          </Fact>
+          <Fact label="Speaks">
+            <input
+              aria-label="Languages, preferred first"
+              value={spec.communication.languages.join(", ")}
+              onChange={(e) => set("communication", { ...spec.communication, languages: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+              className={cn(inline, "text-body")}
+            />
+          </Fact>
+          <Fact label="Tone">
+            <input
+              aria-label="Tone"
+              value={spec.communication.tone}
+              onChange={(e) => set("communication", { ...spec.communication, tone: e.target.value })}
+              className={cn(inline, "text-body")}
+            />
+          </Fact>
+          {spec.approval_requirements.length > 0 && (
+            <Fact label="Asks you">
+              <ul className="space-y-0.5 py-1 text-body text-ink">
+                {spec.approval_requirements.map((a, i) => (
+                  <li key={i}>{a.condition || APPROVAL_LABEL[a.kind]}</li>
+                ))}
+              </ul>
+            </Fact>
+          )}
+        </dl>
+
+        <button
+          type="button"
+          aria-expanded={more}
+          onClick={() => setMore((v) => !v)}
+          className="mt-8 flex min-h-10 items-center gap-1.5 text-meta text-ink-2 hover:text-ink"
+        >
+          <ChevronDown className={cn("size-4 transition-transform", more && "rotate-180")} />
+          More
+        </button>
+        <AnimatePresence initial={false}>
+          {more && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+              <div className="space-y-8 pb-2 pt-4">
+                <Block title="Outcome you want">
+                  <textarea aria-label="Desired outcome" rows={1} value={spec.desired_outcome} onChange={(e) => set("desired_outcome", e.target.value)} className={cn(inline, "text-body")} />
+                </Block>
+                <Block title="Plan">
+                  <Lines items={spec.strategy} onChange={(v) => set("strategy", v)} add="Step" label="Step" />
+                </Block>
+                <Block title="Rules">
+                  <Lines items={spec.constraints} onChange={(v) => set("constraints", v)} add="Rule" label="Rule" />
+                </Block>
+                <Block title="Background">
+                  <Lines items={spec.context} onChange={(v) => set("context", v)} add="Fact" label="Fact" />
+                </Block>
+                <Block title="Ask me before">
+                  <ul className="space-y-1">
+                    {spec.approval_requirements.map((a, i) => (
+                      <li key={i} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] items-center gap-2">
+                        <select
+                          aria-label="Kind"
+                          value={a.kind}
+                          onChange={(e) => set("approval_requirements", spec.approval_requirements.map((x, j) => (j === i ? { ...x, kind: e.target.value as ApprovalKind } : x)))}
+                          className="h-9 rounded-lg bg-surface px-2 text-meta text-ink-2 ring-1 ring-line"
+                        >
+                          {(Object.keys(APPROVAL_LABEL) as ApprovalKind[]).map((k) => (
+                            <option key={k} value={k}>
+                              {APPROVAL_LABEL[k]}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          aria-label="When"
+                          value={a.condition}
+                          onChange={(e) => set("approval_requirements", spec.approval_requirements.map((x, j) => (j === i ? { ...x, condition: e.target.value } : x)))}
+                          className={cn(inline, "text-body")}
+                        />
+                      </li>
+                    ))}
+                    <li>
+                      <button
+                        type="button"
+                        className="flex min-h-9 items-center gap-1.5 text-meta text-ink-3 hover:text-ink"
+                        onClick={() => set("approval_requirements", [...spec.approval_requirements, { kind: "financial", condition: "" }])}
+                      >
+                        <Plus className="size-3.5" /> Checkpoint
+                      </button>
+                    </li>
+                  </ul>
+                </Block>
+                <Block title="Success means">
+                  <Lines items={spec.success_criteria} onChange={(v) => set("success_criteria", v)} add="Criterion" label="Criterion" />
+                </Block>
+                <Block title="Their name and language">
+                  <div className="grid gap-1 sm:grid-cols-2">
+                    <input
+                      aria-label="Their name"
+                      placeholder="Name"
+                      value={spec.counterparty.name ?? ""}
+                      onChange={(e) => set("counterparty", { ...spec.counterparty, name: e.target.value || null })}
+                      className={cn(inline, "text-body")}
+                    />
+                    <input
+                      aria-label="Their language"
+                      placeholder="Language"
+                      value={spec.counterparty.preferred_language ?? ""}
+                      onChange={(e) => set("counterparty", { ...spec.counterparty, preferred_language: e.target.value || null })}
+                      className={cn(inline, "text-body")}
+                    />
+                  </div>
+                </Block>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </fieldset>
+
+      <ErrorNote error={approve.error} className="mt-6" />
+      <div className="sticky bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-10 mt-10 flex justify-end">
+        {!locked && (
+          <Button size="lg" onClick={() => approve.mutate()} disabled={approve.isPending} className="h-12 rounded-full px-7 shadow-[0_10px_40px_-10px_rgb(157_176_255/0.6)]">
+            {approve.isPending ? "Approving…" : "Approve"}
           </Button>
         )}
       </div>
     </div>
+  );
+}
+
+function Block({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={title}>
+      <h2 className="mb-1.5 text-meta text-ink-3">{title}</h2>
+      {children}
+    </section>
   );
 }

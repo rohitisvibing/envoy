@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { ShieldAlert } from "lucide-react";
+import { PenLine } from "lucide-react";
 import type { Approval } from "@/types/api";
 import { APPROVAL_LABEL } from "@/lib/format";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { IconButton } from "@/components/ui/icon-button";
 
 export function ApprovalSheet({
   approval,
@@ -31,52 +31,58 @@ export function ApprovalSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
-        className="mx-auto max-h-[90dvh] w-full max-w-xl overflow-y-auto rounded-t-3xl border-line bg-elevated px-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-6 sm:bottom-6 sm:rounded-3xl sm:border"
+        className="mx-auto max-h-[90dvh] w-full max-w-xl gap-5 overflow-y-auto rounded-t-[2rem] border-0 bg-surface px-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-7 ring-1 ring-warning/30 sm:bottom-6 sm:rounded-[2rem]"
       >
-        <div className="flex items-center gap-2 text-warning">
-          <ShieldAlert className="size-4" />
-          <span className="text-meta font-medium">{APPROVAL_LABEL[approval.kind]}</span>
+        <div>
+          <SheetTitle className="font-serif text-[2rem] font-normal leading-none text-ink">Your call</SheetTitle>
+          <SheetDescription className="mt-2 text-meta text-warning">{APPROVAL_LABEL[approval.kind]}</SheetDescription>
         </div>
-        <SheetTitle className="text-title font-semibold tracking-[-0.015em] text-ink">The agent is waiting for you</SheetTitle>
-        <SheetDescription className="text-body text-ink-2">{approval.reason}</SheetDescription>
 
-        <dl className="space-y-4">
-          <div>
-            <dt className="text-meta text-ink-2">They said</dt>
-            <dd className="mt-1 text-lead text-ink">{approval.request}</dd>
-          </div>
-          <div>
-            <dt className="text-meta text-ink-2">The agent wants to say</dt>
-            <dd className="mt-1 rounded-xl border-l-2 border-violet bg-bg/60 px-3.5 py-2.5 text-lead text-ink">{approval.proposed}</dd>
-          </div>
-        </dl>
+        <div className="space-y-3">
+          {approval.request && (
+            <p className="border-r-2 border-ember/70 pr-3.5 text-right text-lead text-ember">
+              <span className="sr-only">They said: </span>
+              {approval.request}
+            </p>
+          )}
+          <p className="border-l-2 border-aurora/70 pl-3.5 text-lead text-ink">
+            <span className="sr-only">The agent wants to say: </span>
+            {approval.proposed}
+          </p>
+          <p className="text-meta text-ink-2">{approval.reason}</p>
+        </div>
 
         {writing ? (
           <div className="space-y-3">
-            <label htmlFor="alt" className="text-meta text-ink-2">
-              What should the agent say or do instead?
+            <label htmlFor="alt" className="sr-only">
+              What should the agent say instead?
             </label>
-            <Textarea id="alt" autoFocus value={alt} onChange={(e) => setAlt(e.target.value)} className="min-h-24 bg-bg" placeholder="Offer ₹31,000 if they include maintenance." />
+            <textarea
+              id="alt"
+              autoFocus
+              value={alt}
+              onChange={(e) => setAlt(e.target.value)}
+              className="min-h-24 w-full resize-none rounded-2xl bg-bg/60 px-4 py-3 text-body text-ink ring-1 ring-line placeholder:text-ink-3 focus:outline-none focus:ring-aurora/50"
+              placeholder="Offer ₹31,000 if maintenance is included."
+            />
             <div className="flex gap-2">
-              <Button className="h-11 flex-1" disabled={!alt.trim()} onClick={() => decide("alternative", alt.trim())}>
-                Send instead
+              <Button className="h-12 flex-1 rounded-full" disabled={!alt.trim()} onClick={() => decide("alternative", alt.trim())}>
+                Say this instead
               </Button>
-              <Button variant="ghost" className="h-11" onClick={() => setWriting(false)}>
+              <Button variant="ghost" className="h-12 rounded-full" onClick={() => setWriting(false)}>
                 Back
               </Button>
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <Button className="h-12 bg-success text-bg hover:bg-success/90" onClick={() => decide("approved")}>
+          <div className="flex items-center gap-2">
+            <Button className="h-12 flex-1 rounded-full bg-success text-bg hover:bg-success/90" onClick={() => decide("approved")}>
               Approve
             </Button>
-            <Button variant="secondary" className="h-12" onClick={() => decide("rejected")}>
-              Reject
+            <Button variant="secondary" className="h-12 flex-1 rounded-full" onClick={() => decide("rejected")}>
+              Decline
             </Button>
-            <Button variant="ghost" className="col-span-2 h-11 text-ink-2" onClick={() => setWriting(true)}>
-              Tell it what to say instead
-            </Button>
+            <IconButton label="Say something else" icon={PenLine} className="size-12" onClick={() => setWriting(true)} />
           </div>
         )}
       </SheetContent>

@@ -13,19 +13,18 @@
 import { useEffect, useRef } from "react";
 import type { ConversationState } from "@/types/api";
 
-type RGB = [number, number, number];
+export type RGB = [number, number, number];
 
 const C = {
-  violet: [139, 124, 255] as RGB,
-  ink: [244, 245, 247] as RGB,
-  grey: [120, 128, 142] as RGB,
-  success: [50, 201, 138] as RGB,
-  warning: [233, 173, 85] as RGB,
-  error: [240, 107, 112] as RGB,
-  ice: [176, 196, 255] as RGB,
+  aurora: [157, 176, 255] as RGB,
+  ember: [243, 168, 138] as RGB,
+  grey: [120, 124, 150] as RGB,
+  success: [126, 215, 174] as RGB,
+  warning: [242, 194, 90] as RGB,
+  error: [240, 124, 134] as RGB,
 };
 
-interface Params {
+export interface Params {
   spin: number; // radians / second around Y
   radius: number; // relative sphere radius
   breathe: number; // amplitude of slow radius breathing
@@ -38,15 +37,15 @@ interface Params {
   tint: RGB;
 }
 
-const STATE_PARAMS: Record<ConversationState, Params> = {
-  idle: { spin: 0.12, radius: 0.92, breathe: 0.015, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.7, glow: 0.18, float: 0.02, tint: C.violet },
-  ready: { spin: 0.14, radius: 0.94, breathe: 0.02, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.8, glow: 0.22, float: 0.02, tint: C.violet },
-  preparing: { spin: 0.55, radius: 0.9, breathe: 0.035, turbulence: 0.02, levelGain: 0, band: 1, alpha: 0.85, glow: 0.3, float: 0.0, tint: C.violet },
-  connecting: { spin: 0.45, radius: 0.9, breathe: 0.03, turbulence: 0.02, levelGain: 0, band: 0.7, alpha: 0.85, glow: 0.28, float: 0.0, tint: C.violet },
-  listening: { spin: 0.18, radius: 0.95, breathe: 0.0, turbulence: 0.0, levelGain: 0.32, band: 0, alpha: 0.85, glow: 0.24, float: 0.0, tint: C.ice },
-  thinking: { spin: 0.9, radius: 0.88, breathe: 0.02, turbulence: 0.09, levelGain: 0, band: 0.25, alpha: 0.9, glow: 0.34, float: 0.0, tint: C.violet },
-  speaking: { spin: 0.3, radius: 0.96, breathe: 0.0, turbulence: 0.01, levelGain: 0.42, band: 0, alpha: 1, glow: 0.4, float: 0.0, tint: C.violet },
-  interrupted: { spin: 0.18, radius: 0.95, breathe: 0.0, turbulence: 0.0, levelGain: 0.32, band: 0, alpha: 0.85, glow: 0.24, float: 0.0, tint: C.ice },
+export const STATE_PARAMS: Record<ConversationState, Params> = {
+  idle: { spin: 0.12, radius: 0.92, breathe: 0.015, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.7, glow: 0.18, float: 0.02, tint: C.aurora },
+  ready: { spin: 0.14, radius: 0.94, breathe: 0.02, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.8, glow: 0.22, float: 0.02, tint: C.aurora },
+  preparing: { spin: 0.55, radius: 0.9, breathe: 0.035, turbulence: 0.02, levelGain: 0, band: 1, alpha: 0.85, glow: 0.3, float: 0.0, tint: C.aurora },
+  connecting: { spin: 0.45, radius: 0.9, breathe: 0.03, turbulence: 0.02, levelGain: 0, band: 0.7, alpha: 0.85, glow: 0.28, float: 0.0, tint: C.aurora },
+  listening: { spin: 0.18, radius: 0.95, breathe: 0.0, turbulence: 0.0, levelGain: 0.32, band: 0, alpha: 0.85, glow: 0.24, float: 0.0, tint: C.ember },
+  thinking: { spin: 0.9, radius: 0.88, breathe: 0.02, turbulence: 0.09, levelGain: 0, band: 0.25, alpha: 0.9, glow: 0.34, float: 0.0, tint: C.aurora },
+  speaking: { spin: 0.3, radius: 0.96, breathe: 0.0, turbulence: 0.01, levelGain: 0.42, band: 0, alpha: 1, glow: 0.4, float: 0.0, tint: C.aurora },
+  interrupted: { spin: 0.18, radius: 0.95, breathe: 0.0, turbulence: 0.0, levelGain: 0.32, band: 0, alpha: 0.85, glow: 0.24, float: 0.0, tint: C.ember },
   paused: { spin: 0.02, radius: 0.86, breathe: 0.005, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.32, glow: 0.05, float: 0.0, tint: C.grey },
   awaiting_approval: { spin: 0.08, radius: 0.9, breathe: 0.03, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.85, glow: 0.3, float: 0.0, tint: C.warning },
   completed: { spin: 0.06, radius: 0.84, breathe: 0.01, turbulence: 0.0, levelGain: 0, band: 0, alpha: 0.8, glow: 0.22, float: 0.01, tint: C.success },

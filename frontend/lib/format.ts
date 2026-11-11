@@ -12,11 +12,11 @@ export function quantity(q: Quantity): string {
 
 export function relativeTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 45) return "just now";
-  if (diff < 3600) return `${Math.round(diff / 60)} min ago`;
-  if (diff < 86400) return `${Math.round(diff / 3600)} h ago`;
+  if (diff < 45) return "now";
+  if (diff < 3600) return `${Math.round(diff / 60)}m`;
+  if (diff < 86400) return `${Math.round(diff / 3600)}h`;
   const days = Math.round(diff / 86400);
-  if (days < 7) return `${days} d ago`;
+  if (days < 7) return `${days}d`;
   return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
@@ -27,16 +27,16 @@ export function clock(iso: string): string {
 export const STATE_LABEL: Record<ConversationState, string> = {
   idle: "Idle",
   preparing: "Preparing",
-  ready: "Ready to start",
+  ready: "Ready",
   connecting: "Connecting",
   listening: "Listening",
   thinking: "Thinking",
   speaking: "Speaking",
   interrupted: "Interrupted",
   paused: "Paused",
-  awaiting_approval: "Waiting for you",
-  completed: "Completed",
-  failed: "Failed",
+  awaiting_approval: "Needs you",
+  completed: "Done",
+  failed: "Stopped",
 };
 
 export const MISSION_STATUS_LABEL: Record<MissionStatus, string> = {
@@ -50,14 +50,14 @@ export const MISSION_STATUS_LABEL: Record<MissionStatus, string> = {
 
 export const DISCLOSURE_LABEL: Record<Disclosure, string> = {
   always: "Always",
-  relevant: "When relevant",
+  relevant: "If relevant",
   approval: "Ask me",
   never: "Never",
 };
 
 export const APPROVAL_LABEL: Record<ApprovalKind, string> = {
-  info_disclosure: "Share personal information",
-  negotiation_authority: "Go beyond the agreed range",
-  financial: "Financial commitment",
-  final_commitment: "Accept final terms",
+  info_disclosure: "Sharing your details",
+  negotiation_authority: "Going past your range",
+  financial: "Spending money",
+  final_commitment: "Agreeing to a deal",
 };

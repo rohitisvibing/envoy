@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ShieldAlert } from "lucide-react";
+import { ArrowDown, Zap } from "lucide-react";
 import type { ConversationState, TranscriptEvent } from "@/types/api";
 import type { Partial } from "@/hooks/useConversation";
 import type { ProgressFn } from "@/hooks/useSpokenProgress";
@@ -60,17 +60,11 @@ function LiveText({ text, progress, interrupted }: { text: string; progress: Pro
       {interrupted ? (
         rest && <span className="text-ink-3/70 line-through decoration-ink-3/40">{rest}</span>
       ) : (
-        <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-violet align-baseline" aria-hidden />
+        <span className="ml-0.5 inline-block h-[1em] w-[2px] translate-y-[2px] animate-pulse bg-current align-baseline opacity-70" aria-hidden />
       )}
     </>
   );
 }
-
-const NUDGE_STATUS: Record<string, string> = {
-  queued: "Queued for the agent's next line",
-  applied: "Applied",
-  noted: "Noted as guidance",
-};
 
 const Row = memo(function Row({
   e,
@@ -91,32 +85,15 @@ const Row = memo(function Row({
   const isSpeech = e.kind === "speech";
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const progress = useMemo(() => (isSpeech ? progressFor(e) : null), [eventId, isSpeech, progressFor]);
-  const meta = (
-    <span className="flex gap-2 text-[11px] text-ink-3 tabular">
-      <time dateTime={e.ts}>{clock(e.ts)}</time>
-      {e.language && <span>{e.language}</span>}
-      {e.source === "voice" && <span>voice</span>}
-      {interrupted && <span className="text-warning">cut off</span>}
-      {Array.isArray(e.meta?.nudges) && (e.meta.nudges as string[]).length > 0 && <span className="text-violet">follows your nudge</span>}
-    </span>
-  );
 
   if (e.kind === "event")
-    return (
-      <li className="flex items-center gap-3 py-1.5 text-[12px] text-ink-3">
-        <span className="h-px flex-1 bg-line/70" aria-hidden />
-        <span className="max-w-[80%] text-center">{e.text}</span>
-        <span className="h-px flex-1 bg-line/70" aria-hidden />
-      </li>
-    );
+    return <li className="py-2 text-center text-[12px] text-ink-3">{e.text}</li>;
 
   if (e.kind === "approval")
     return (
-      <li className="py-1.5">
-        <div className={cn("flex items-start gap-2 rounded-xl border px-3 py-2 text-meta", e.speaker === "user" ? "border-line text-ink-2" : "border-warning/35 bg-warning/8 text-ink")}>
-          <ShieldAlert className={cn("mt-0.5 size-3.5 shrink-0", e.speaker === "user" ? "text-ink-3" : "text-warning")} />
-          <span className="min-w-0 break-words">{e.text}</span>
-        </div>
+      <li className={cn("flex items-start gap-2 py-2 text-meta", e.speaker === "user" ? "justify-end text-ink-2" : "text-warning")}>
+        {e.speaker !== "user" && <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-warning" aria-hidden />}
+        <span className="line-clamp-2 min-w-0 max-w-[85%] break-words" title={e.text}>{e.text}</span>
       </li>
     );
 
@@ -125,45 +102,63 @@ const Row = memo(function Row({
     const appliedIn = e.meta?.applied_in as string | undefined;
     return (
       <li className="flex justify-end py-1.5">
-        <div className="max-w-[85%] rounded-2xl rounded-br-md bg-elevated px-3.5 py-2 ring-1 ring-line">
-          <span className="block text-[11px] text-ink-2">
-            {e.meta?.urgent ? "You cut in" : "You nudged the agent"}
-          </span>
-          <p className="mt-0.5 break-words text-body text-ink">{e.text}</p>
-          <span className={cn("mt-1 flex items-center gap-1.5 text-[11px]", status === "queued" ? "text-ink-3" : status === "applied" ? "text-violet" : "text-ink-2")}>
-            {status === "queued" && <span className="size-1.5 animate-pulse rounded-full bg-ink-3" aria-hidden />}
-            {NUDGE_STATUS[status] ?? status}
-            {status === "applied" && appliedIn && (
-              <button type="button" className="underline decoration-violet/40 underline-offset-2 hover:decoration-violet" onClick={() => onJump(appliedIn)}>
-                see the line
+        <span className="inline-flex max-w-[85%] items-baseline gap-2 rounded-2xl bg-elevated/80 px-3 py-1.5 text-meta ring-1 ring-line">
+          <span className="sr-only">{e.meta?.urgent ? "You cut in:" : "Your nudge:"}</span>
+          {Boolean(e.meta?.urgent) && <Zap className="size-3 shrink-0 translate-y-0.5 text-warning" aria-hidden />}
+          <span className="min-w-0 break-words text-ink">{e.text}</span>
+          {status === "queued" && (
+            <span className="flex shrink-0 items-center gap-1 text-ink-3">
+              <span className="size-1.5 animate-pulse rounded-full bg-ink-3" aria-hidden />
+              <span className="sr-only">queued</span>
+            </span>
+          )}
+          {status === "noted" && <span className="shrink-0 text-ink-3">noted</span>}
+          {status === "applied" &&
+            (appliedIn ? (
+              <button type="button" className="shrink-0 text-aurora hover:underline" onClick={() => onJump(appliedIn)} aria-label="Applied. Show the line.">
+                used ↗
               </button>
-            )}
-          </span>
-        </div>
+            ) : (
+              <span className="shrink-0 text-aurora">used</span>
+            ))}
+        </span>
       </li>
     );
   }
 
   const isAgent = e.speaker === "agent";
-  const isYou = e.speaker === "user";
+  const isThem = e.speaker === "counterparty";
+  const name = isThem ? counterpartyLabel : SPEAKER[e.speaker];
+  const nudged = Array.isArray(e.meta?.nudges) && (e.meta.nudges as string[]).length > 0;
   return (
-    <li className="py-2" data-event-id={e.id}>
+    <li className={cn("group flex py-2.5", isAgent ? "justify-start" : "justify-end")} data-event-id={e.id}>
       <div
         className={cn(
-          "rounded-r-lg border-l-2 pl-3 transition-colors duration-700",
-          isAgent ? "border-violet" : isYou ? "border-ink-2" : "border-transparent",
-          highlighted && "bg-violet-soft",
+          "max-w-[88%] py-0.5 transition-colors duration-700",
+          isAgent ? "border-l-2 border-aurora/70 pl-3.5 pr-2" : "border-r-2 pl-2 pr-3.5",
+          isThem && "border-ember/70",
+          !isAgent && !isThem && "border-ink-2/60",
+          highlighted && "bg-aurora-soft",
         )}
       >
-        <div className="flex items-baseline gap-2">
-          <span className={cn("text-meta font-medium", isAgent ? "text-violet" : "text-ink-2")}>
-            {e.speaker === "counterparty" ? counterpartyLabel : SPEAKER[e.speaker]}
-          </span>
-          {meta}
-        </div>
-        <p className="mt-0.5 break-words text-lead leading-relaxed text-ink">
+        <p
+          lang={e.language && !/^en/i.test(e.language) ? e.language.slice(0, 2).toLowerCase() : undefined}
+          className={cn("break-words text-lead leading-relaxed", isThem ? "text-ember/95" : "text-ink")}
+        >
+          <span className="sr-only">{name}: </span>
           {progress ? <LiveText text={e.text} progress={progress} interrupted={interrupted} /> : e.text}
         </p>
+        <span
+          className={cn(
+            "mt-0.5 flex gap-2 text-[11px] text-ink-3 tabular",
+            !isAgent && "justify-end",
+            !nudged && "opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100",
+          )}
+        >
+          {nudged && <span className="text-aurora">nudged</span>}
+          <time dateTime={e.ts}>{clock(e.ts)}</time>
+          {e.language && <span>{e.language}</span>}
+        </span>
       </div>
     </li>
   );
@@ -238,25 +233,25 @@ export function Transcript({
       <div ref={scroller} className="h-full overflow-y-auto overscroll-contain px-1" aria-live="polite" aria-relevant="additions" role="log" aria-label="Live transcript">
         <div ref={list}>
           {empty ? (
-            <p className="py-6 text-center text-meta text-ink-3">The transcript appears here as the conversation happens.</p>
+            <p className="sr-only">Nothing said yet.</p>
           ) : (
             <ul className="pb-2">
               {events.map((e) => (
                 <Row key={e.id} e={e} counterpartyLabel={counterpartyLabel} progressFor={progressFor} highlighted={highlight === e.id} onJump={jump} />
               ))}
               {partials.map((p) => (
-                <li key={p.id} className="py-2">
-                  <div className="border-l-2 border-transparent pl-3">
-                    <span className="flex items-baseline gap-2">
-                      <span className="text-meta font-medium text-ink-2">{counterpartyLabel}</span>
-                      <span className="text-[11px] text-ink-3">speaking…</span>
-                    </span>
-                    <p className="mt-0.5 break-words text-lead leading-relaxed text-ink-2">{p.text}</p>
-                  </div>
+                <li key={p.id} className="flex justify-end py-2.5">
+                  <p className="max-w-[88%] break-words border-r-2 border-ember/40 pl-2 pr-3.5 text-lead leading-relaxed text-ember/60">
+                    <span className="sr-only">{counterpartyLabel}, speaking: </span>
+                    {p.text}
+                  </p>
                 </li>
               ))}
               {activity && partials.length === 0 && (
-                <li className="flex items-center gap-2 py-2 pl-3 text-meta text-ink-3" aria-live="off">
+                <li
+                  className={cn("flex items-center gap-2 py-2.5 text-meta text-ink-3", activity.state === "thinking" ? "pl-3.5" : "justify-end pr-3.5")}
+                  aria-live="off"
+                >
                   <StatusGlyph state={activity.state} />
                   {activity.label}
                 </li>
@@ -274,9 +269,9 @@ export function Transcript({
             const el = scroller.current;
             if (el) el.scrollTop = el.scrollHeight;
           }}
-          className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-elevated px-3 py-1.5 text-[12px] text-ink ring-1 ring-line"
+          className="absolute bottom-2 left-1/2 grid size-9 -translate-x-1/2 place-items-center rounded-full bg-elevated text-ink shadow-lg ring-1 ring-line" aria-label="Jump to latest"
         >
-          <ArrowDown className="size-3.5" /> Latest
+          <ArrowDown className="size-4" />
         </button>
       )}
     </div>
